@@ -167,6 +167,13 @@ async def admin_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def crypto_news(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
+    waiting_message = await update.message.reply_text(
+        "🤖⏳\n\n"
+        "لطفاً کمی صبر کنید ....\n\n"
+        "📰 در حال دریافت و آماده‌سازی اخبار کریپتو هستیم.\n"
+        "این فرآیند ممکن است چند لحظه زمان ببرد 🙏✨"
+    )
+
     try:
 
         response = requests.get(
@@ -177,13 +184,16 @@ async def crypto_news(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "language": "en",
                 "size": NEWS_COUNT,
             },
-            timeout=10,
+            timeout=30,
         )
 
         data = response.json()
 
         if data.get("status") != "success":
-            await update.message.reply_text("❌ خطا در دریافت اخبار.")
+            await update.message.reply_text(
+                "❌ متأسفانه دریافت اخبار با مشکل مواجه شد.\n"
+                "لطفاً چند لحظه بعد دوباره امتحان کنید."
+            )
             return
 
         # حذف خبرهای تکراری و بدون عکس
@@ -252,6 +262,8 @@ async def crypto_news(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 ]
             ]
         )
+
+        await waiting_message.delete()
 
         await update.message.reply_photo(
             photo=news["image_url"], caption=caption, reply_markup=keyboard
