@@ -17,14 +17,17 @@ from telegram.ext import (
 from config import *
 
 import feedparser
+from telegram.error import Forbidden, BadRequest
 import requests
 from deep_translator import GoogleTranslator
 from functools import wraps
 
 ADMIN_WAITING_FOR_CONFIG = {}
+ADMIN_WAITING_FOR_BROADCAST = set()
 
 CHANNEL_USERNAME = "@SADSSCS"
 CHANNEL_LINK = "https://t.me/SADSSCS"
+USERS_FILE = "users.txt"
 
 # ------------------ KEYBOARDS ------------------
 
@@ -146,12 +149,54 @@ def membership_required(func):
     return wrapper
 
 
+# ------------------ save user ------------------
+
+
+def save_user(user):
+
+    user_id = str(user.id)
+    first_name = (user.first_name or "").replace("|", "")
+    username = user.username or ""
+
+    users = {}
+
+    try:
+        with open(USERS_FILE, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+
+                if not line:
+                    continue
+
+                parts = line.split("|")
+
+                if len(parts) >= 3:
+                    users[parts[0]] = (
+                        parts[1],
+                        parts[2],
+                    )
+
+    except FileNotFoundError:
+        pass
+
+    users[user_id] = (
+        first_name,
+        username,
+    )
+
+    with open(USERS_FILE, "w", encoding="utf-8") as f:
+        for uid, data in users.items():
+            f.write(f"{uid}|{data[0]}|{data[1]}\n")
+
+
 # ------------------ START ------------------
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user_id = update.effective_user.id
+
+    save_user(update.effective_user)
 
     if not await check_membership(user_id, context):
 
@@ -454,6 +499,79 @@ async def receive_vpn_config(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text("❌ ارسال کانفیگ با خطا مواجه شد.")
 
     del ADMIN_WAITING_FOR_CONFIG[admin_id]
+
+
+# ------------------ receive broadcast ------------------
+
+
+async def receive_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    if update.effective_user.id != ADMIN_ID:
+        return
+
+    if update.effective_user.id not in ADMIN_WAITING_FOR_BROADCAST:
+        return
+
+    ADMIN_WAITING_FOR_BROADCAST.remove(update.effective_user.id)
+
+    text = update.message.text
+
+    success = 0
+    failed = 0
+
+    try:
+        with open(USERS_FILE, "r", encoding="utf-8") as f:
+            users = [line.strip().split("|")[0] for line in f if line.strip()]
+
+    except FileNotFoundError:
+        users = []
+
+    for user_id in users:
+
+        try:
+
+            await context.bot.send_message(
+                chat_id=int(user_id),
+                text=text,
+            )
+
+            success += 1
+
+        except (Forbidden, BadRequest):
+
+            failed += 1
+
+            try:
+
+                with open(USERS_FILE, "r", encoding="utf-8") as f:
+                    lines = f.readlines()
+
+                with open(USERS_FILE, "w", encoding="utf-8") as f:
+                    for line in lines:
+                        if not line.startswith(f"{user_id}|"):
+                            f.write(line)
+
+            except Exception:
+                pass
+
+        except Exception:
+
+            failed += 1
+
+    await update.message.reply_text(
+        f"""
+✅ پیام همگانی ارسال شد.
+
+━━━━━━━━━━━━━━
+
+📨 ارسال موفق:
+<b>{success}</b>
+
+❌ ارسال ناموفق:
+<b>{failed}</b>
+""",
+        parse_mode="HTML",
+    )
 
 
 # ------------------ buy vpn callback ------------------
@@ -931,12 +1049,160 @@ async def check_join_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
 
 
+# ------------------ admin panel ------------------
+
+
+async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    if update.effective_user.id != ADMIN_ID:
+        return
+
+    keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "📊 آمار کاربران",
+                    callback_data="admin_stats",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "📢 پیام همگانی",
+                    callback_data="admin_broadcast",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "📥 درخواست‌های VPN",
+                    callback_data="admin_vpn",
+                )
+            ],
+        ]
+    )
+
+    await update.message.reply_text(
+        """
+⚙️ <b>پنل مدیریت</b>
+
+یکی از گزینه‌های زیر را انتخاب کنید.
+""",
+        parse_mode="HTML",
+        reply_markup=keyboard,
+    )
+
+
+# ------------------- stats ------------------
+
+
+async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    if update.effective_user.id != ADMIN_ID:
+        return
+
+    try:
+
+        with open(USERS_FILE, "r", encoding="utf-8") as f:
+            users = [line for line in f.readlines() if line.strip()]
+
+        total_users = len(users)
+
+    except FileNotFoundError:
+        total_users = 0
+
+    await update.message.reply_text(
+        f"""
+📊 <b>آمار ربات</b>
+
+━━━━━━━━━━━━━━
+
+👥 تعداد کاربران:
+<b>{total_users}</b>
+
+📁 فایل کاربران:
+<code>{USERS_FILE}</code>
+
+✅ وضعیت:
+<b>فعال</b>
+""",
+        parse_mode="HTML",
+    )
+
+
+# ------------------- admin stats callback ------------------
+
+
+async def admin_stats_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    query = update.callback_query
+    await query.answer()
+
+    if query.from_user.id != ADMIN_ID:
+        return
+
+    try:
+        with open(USERS_FILE, "r", encoding="utf-8") as f:
+            users = [line for line in f.readlines() if line.strip()]
+
+        total_users = len(users)
+
+    except FileNotFoundError:
+        total_users = 0
+
+    await query.edit_message_text(
+        f"""
+📊 <b>آمار ربات</b>
+
+━━━━━━━━━━━━━━
+
+👥 تعداد کاربران:
+<b>{total_users}</b>
+
+📁 فایل کاربران:
+<code>{USERS_FILE}</code>
+
+✅ وضعیت:
+<b>فعال</b>
+""",
+        parse_mode="HTML",
+    )
+
+
+# ------------------- admin broadcast callback ------------------
+
+
+async def admin_broadcast_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    query = update.callback_query
+
+    await query.answer()
+
+    if query.from_user.id != ADMIN_ID:
+        return
+
+    ADMIN_WAITING_FOR_BROADCAST.add(query.from_user.id)
+
+    await query.edit_message_text(
+        """
+📢 <b>ارسال پیام همگانی</b>
+
+پیام موردنظر را ارسال کنید.
+
+هر متنی که ارسال کنید، برای تمام کاربران ربات فرستاده خواهد شد.
+
+❌ برای لغو کافیست /start را بزنید.
+""",
+        parse_mode="HTML",
+    )
+
+
 # ------------------- HANDLERS ------------------
 
 
 def get_handlers():
 
     return [
+        CommandHandler("admin", admin_panel),
+        CommandHandler("stats", stats),
         CommandHandler("start", start),
         MessageHandler(filters.Regex("^👨‍💻 درباره‌ی من$"), about_me),
         MessageHandler(filters.Regex("^🛠 خدمات$"), services),
@@ -952,12 +1218,24 @@ def get_handlers():
         CallbackQueryHandler(send_config_callback, pattern="^send_config_"),
         CallbackQueryHandler(already_received_callback, pattern="^already_received_"),
         CallbackQueryHandler(contact_support_callback, pattern="^contact_support$"),
+        CallbackQueryHandler(
+            admin_stats_callback,
+            pattern="^admin_stats$",
+        ),
+        CallbackQueryHandler(
+            admin_broadcast_callback,
+            pattern="^admin_broadcast$",
+        ),
         CallbackQueryHandler(vpn_guide_callback, pattern="^vpn_guide$"),
         CallbackQueryHandler(buy_vpn_callback, pattern="^buy_vpn$"),
         # پاسخ ادمین به کاربران
         MessageHandler(
             filters.User(ADMIN_ID) & filters.REPLY & ~filters.COMMAND,
             admin_reply,
+        ),
+        MessageHandler(
+            filters.User(ADMIN_ID) & filters.TEXT & ~filters.COMMAND,
+            receive_broadcast,
         ),
         # ارسال کانفیگ VPN
         MessageHandler(
