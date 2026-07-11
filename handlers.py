@@ -427,6 +427,8 @@ async def receive_vpn_config(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     admin_id = update.effective_user.id
 
+    print(ADMIN_WAITING_FOR_CONFIG)
+
     if admin_id not in ADMIN_WAITING_FOR_CONFIG:
         return
 
@@ -572,6 +574,22 @@ async def receive_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
 """,
         parse_mode="HTML",
     )
+
+
+# ------------------ admin text router ------------------
+
+
+async def admin_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    admin_id = update.effective_user.id
+
+    if admin_id in ADMIN_WAITING_FOR_CONFIG:
+        await receive_vpn_config(update, context)
+        return
+
+    if admin_id in ADMIN_WAITING_FOR_BROADCAST:
+        await receive_broadcast(update, context)
+        return
 
 
 # ------------------ buy vpn callback ------------------
@@ -1235,12 +1253,7 @@ def get_handlers():
         ),
         MessageHandler(
             filters.User(ADMIN_ID) & filters.TEXT & ~filters.COMMAND,
-            receive_broadcast,
-        ),
-        # ارسال کانفیگ VPN
-        MessageHandler(
-            filters.User(ADMIN_ID) & filters.TEXT & ~filters.COMMAND,
-            receive_vpn_config,
+            admin_text_router,
         ),
         # پیام کاربران برای ادمین
         MessageHandler(
