@@ -19,8 +19,12 @@ from config import *
 import feedparser
 import requests
 from deep_translator import GoogleTranslator
+from functools import wraps
 
 ADMIN_WAITING_FOR_CONFIG = {}
+
+CHANNEL_USERNAME = "@SADSSCS"
+CHANNEL_LINK = "https://t.me/SADSSCS"
 
 # ------------------ KEYBOARDS ------------------
 
@@ -54,16 +58,149 @@ VPN_TEST_KEYBOARD = InlineKeyboardMarkup(
     [[InlineKeyboardButton("📥 دریافت اشتراک تست", callback_data="vpn_test")]]
 )
 
+# ------------------ check membership ------------------
+
+
+async def check_membership(user_id, context):
+
+    try:
+        member = await context.bot.get_chat_member(
+            chat_id=CHANNEL_USERNAME,
+            user_id=user_id,
+        )
+
+        return member.status in (
+            "member",
+            "administrator",
+            "creator",
+        )
+
+    except Exception:
+        return False
+
+
+# ------------------ membership guard ------------------
+
+
+async def membership_guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    user_id = update.effective_user.id
+
+    if await check_membership(user_id, context):
+        return True
+
+    keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "📢 عضویت در کانال",
+                    url=CHANNEL_LINK,
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "✅ عضو شدم",
+                    callback_data="check_join",
+                )
+            ],
+        ]
+    )
+
+    if update.callback_query:
+
+        await update.callback_query.message.reply_text(
+            """❌ هنوز عضو کانال نیستید.
+
+برای استفاده از تمام امکانات ربات باید عضو کانال باشید.
+
+👇 ابتدا عضو شوید و سپس روی «✅ عضو شدم» بزنید.""",
+            reply_markup=keyboard,
+        )
+
+    else:
+
+        await update.message.reply_text(
+            """❌ هنوز عضو کانال نیستید.
+
+برای استفاده از تمام امکانات ربات باید عضو کانال باشید.
+
+👇 ابتدا عضو شوید و سپس روی «✅ عضو شدم» بزنید.""",
+            reply_markup=keyboard,
+        )
+
+    return False
+
+
+def membership_required(func):
+
+    @wraps(func)
+    async def wrapper(
+        update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs
+    ):
+
+        if not await membership_guard(update, context):
+            return
+
+        return await func(update, context, *args, **kwargs)
+
+    return wrapper
+
+
 # ------------------ START ------------------
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("به ربات خوش آمدید.", reply_markup=MAIN_KEYBOARD)
+
+    user_id = update.effective_user.id
+
+    if not await check_membership(user_id, context):
+
+        keyboard = InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton(
+                        "📢 عضویت در کانال",
+                        url=CHANNEL_LINK,
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        "✅ عضو شدم",
+                        callback_data="check_join",
+                    )
+                ],
+            ]
+        )
+
+        await update.message.reply_text(
+            """
+🌸 سلام دوست عزیز، خوش اومدی.
+
+برای استفاده از امکانات ربات، ابتدا باید عضو کانال رسمی ما بشی.
+
+🎁 مزایای عضویت:
+
+• دریافت اشتراک تست رایگان VPN
+• اطلاع از بروزرسانی‌های ربات
+• آموزش‌ها و اخبار
+
+👇 بعد از عضویت روی دکمه «✅ عضو شدم» بزن.
+""",
+            reply_markup=keyboard,
+        )
+
+        return
+
+    await update.message.reply_text(
+        "🎉 به ربات خوش آمدید.",
+        reply_markup=MAIN_KEYBOARD,
+    )
 
 
-# ------------------ ABOUT ------------------
+# ------------------ ABOUT me ------------------
 
 
+@membership_required
 async def about_me(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(ABOUT_TEXT)
 
@@ -71,10 +208,15 @@ async def about_me(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ------------------ SERVICES ------------------
 
 
+@membership_required
 async def services(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(SERVICES_TEXT, reply_markup=SERVICES_KEYBOARD)
 
 
+# ------------------ back to nenu ------------------
+
+
+@membership_required
 async def back_to_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "به منوی اصلی بازگشتید.", reply_markup=MAIN_KEYBOARD
@@ -84,6 +226,7 @@ async def back_to_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ------------------- vpn config ------------------
 
 
+@membership_required
 async def vpn_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
@@ -104,6 +247,7 @@ async def vpn_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ------------------- vpn test ------------------
 
 
+@membership_required
 async def vpn_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
@@ -124,6 +268,7 @@ async def vpn_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ------------------ vpn test request ------------------
 
 
+@membership_required
 async def vpn_test_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     query = update.callback_query
@@ -171,6 +316,7 @@ async def vpn_test_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ------------------ send config callback ------------------
 
 
+@membership_required
 async def send_config_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     query = update.callback_query
@@ -188,6 +334,7 @@ async def send_config_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 # ------------------ already receive callback ------------------
 
 
+@membership_required
 async def already_received_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     query = update.callback_query
@@ -230,6 +377,7 @@ async def already_received_callback(update: Update, context: ContextTypes.DEFAUL
 # ------------------ receive vpn config ------------------
 
 
+@membership_required
 async def receive_vpn_config(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     admin_id = update.effective_user.id
@@ -311,6 +459,7 @@ async def receive_vpn_config(update: Update, context: ContextTypes.DEFAULT_TYPE)
 # ------------------ buy vpn callback ------------------
 
 
+@membership_required
 async def buy_vpn_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     query = update.callback_query
@@ -328,6 +477,7 @@ async def buy_vpn_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ------------------ vpn guide callback ------------------
 
 
+@membership_required
 async def vpn_guide_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     query = update.callback_query
@@ -388,6 +538,7 @@ async def vpn_guide_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 # ------------------ SEND TO ADMIN ------------------
 
 
+@membership_required
 async def forward_to_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # پیام‌های ادمین را پردازش نکن
@@ -469,6 +620,7 @@ async def admin_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # ------------------ CRYPTO NEWS ------------------
 
 
+@membership_required
 async def crypto_news(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     waiting_message = await update.message.reply_text(
@@ -583,6 +735,7 @@ async def crypto_news(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ------------------ NEXT NEWS ------------------
 
 
+@membership_required
 async def next_news(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     query = update.callback_query
@@ -678,6 +831,7 @@ async def next_news(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ------------------ contact support callback ------------------
 
 
+@membership_required
 async def contact_support_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     query = update.callback_query
@@ -697,6 +851,7 @@ async def contact_support_callback(update: Update, context: ContextTypes.DEFAULT
 # ------------------ contact me ------------------
 
 
+@membership_required
 async def contact_me(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     context.user_data["contact_mode"] = True
@@ -713,6 +868,7 @@ async def contact_me(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ------------------- buy vpn ------------------
 
 
+@membership_required
 async def buy_vpn(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text("""💎 خرید اشتراک
@@ -722,6 +878,57 @@ async def buy_vpn(update: Update, context: ContextTypes.DEFAULT_TYPE):
 به‌زودی امکان خرید اشتراک از طریق ربات فعال خواهد شد.
 
 🙏 از صبر و همراهی شما متشکریم. ❤️""")
+
+
+# ------------------ check join callback ------------------
+
+
+async def check_join_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    query = update.callback_query
+    await query.answer()
+
+    user_id = query.from_user.id
+
+    if await check_membership(user_id, context):
+
+        await query.message.delete()
+
+        await context.bot.send_message(
+            chat_id=user_id,
+            text="🎉 عضویت شما تأیید شد.\n\nبه ربات خوش آمدید 🌸",
+            reply_markup=MAIN_KEYBOARD,
+        )
+
+    else:
+
+        await query.answer()
+
+        await query.message.reply_text(
+            """
+❌ هنوز عضو کانال نشدی.
+
+برای استفاده از ربات ابتدا باید عضو کانال بشی.
+
+👇 بعد از عضویت دوباره روی «✅ عضو شدم» بزن.
+""",
+            reply_markup=InlineKeyboardMarkup(
+                [
+                    [
+                        InlineKeyboardButton(
+                            "📢 عضویت در کانال",
+                            url=CHANNEL_LINK,
+                        )
+                    ],
+                    [
+                        InlineKeyboardButton(
+                            "✅ عضو شدم",
+                            callback_data="check_join",
+                        )
+                    ],
+                ]
+            ),
+        )
 
 
 # ------------------- HANDLERS ------------------
@@ -739,6 +946,7 @@ def get_handlers():
         MessageHandler(filters.Regex("^💎 خرید اشتراک$"), buy_vpn),
         MessageHandler(filters.Regex("^📰 اخبار کریپتو$"), crypto_news),
         MessageHandler(filters.Regex("^💬 ارتباط با من$"), contact_me),
+        CallbackQueryHandler(check_join_callback, pattern="^check_join$"),
         CallbackQueryHandler(next_news, pattern="next_news"),
         CallbackQueryHandler(vpn_test_request, pattern="^vpn_test$"),
         CallbackQueryHandler(send_config_callback, pattern="^send_config_"),
