@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta
+
 from telegram import (
     ReplyKeyboardMarkup,
     ReplyKeyboardRemove,
@@ -21,6 +23,22 @@ from telegram.error import Forbidden, BadRequest
 import requests
 from deep_translator import GoogleTranslator
 from functools import wraps
+from database import add_user, get_users, get_users_count
+from database import has_received_trial, set_trial_received
+from database import save_referral
+from database import get_referrals_count
+from database import save_referral, has_referral
+from database import (
+    get_inviter,
+    reward_already_paid,
+    mark_reward_paid,
+    add_balance,
+)
+from database import get_balance
+from database import get_referrals
+from database import get_join_date
+from database import get_referral_earnings
+from urllib.parse import quote
 
 ADMIN_WAITING_FOR_CONFIG = {}
 ADMIN_WAITING_FOR_BROADCAST = set()
@@ -28,9 +46,10 @@ ADMIN_WAITING_FOR_SUB = {}
 
 CHANNEL_USERNAME = "@SADSSCS"
 CHANNEL_LINK = "https://t.me/SADSSCS"
-USERS_FILE = "users.txt"
+
 
 # ------------------ KEYBOARDS ------------------
+
 
 MAIN_KEYBOARD = ReplyKeyboardMarkup(
     [
@@ -51,8 +70,8 @@ SERVICES_KEYBOARD = ReplyKeyboardMarkup(
 
 VPN_KEYBOARD = ReplyKeyboardMarkup(
     [
-        ["🎁 اشتراک تست"],
-        ["💎 خرید اشتراک"],
+        ["🎁 اشتراک تست", "💎 خرید اشتراک"],
+        ["👥 زیرمجموعه گیری", "👤 حساب کاربری"],
         ["🔙 بازگشت"],
     ],
     resize_keyboard=True,
@@ -155,39 +174,11 @@ def membership_required(func):
 
 def save_user(user):
 
-    user_id = str(user.id)
-    first_name = (user.first_name or "").replace("|", "")
-    username = user.username or ""
-
-    users = {}
-
-    try:
-        with open(USERS_FILE, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-
-                if not line:
-                    continue
-
-                parts = line.split("|")
-
-                if len(parts) >= 3:
-                    users[parts[0]] = (
-                        parts[1],
-                        parts[2],
-                    )
-
-    except FileNotFoundError:
-        pass
-
-    users[user_id] = (
-        first_name,
-        username,
+    add_user(
+        user.id,
+        user.username or "",
+        user.full_name,
     )
-
-    with open(USERS_FILE, "w", encoding="utf-8") as f:
-        for uid, data in users.items():
-            f.write(f"{uid}|{data[0]}|{data[1]}\n")
 
 
 # ------------------ START ------------------
@@ -197,7 +188,23 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user_id = update.effective_user.id
 
-    save_user(update.effective_user)
+    add_user(
+        update.effective_user.id,
+        update.effective_user.username,
+        update.effective_user.full_name,
+    )
+
+    args = context.args
+
+    if args:
+        try:
+            inviter_id = int(args[0])
+
+            if inviter_id != user_id and not has_referral(user_id):
+                save_referral(user_id, inviter_id)
+
+        except Exception:
+            pass
 
     if not await check_membership(user_id, context):
 
@@ -276,14 +283,9 @@ async def back_to_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def vpn_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
-        """🔐 خدمات VPN
+        """🔐 خدمات کانفیگ
 
-یکی از گزینه‌های زیر را انتخاب کنید.
-
-🎁 اشتراک تست
-
-💎 خرید اشتراک
-(به‌زودی فعال می‌شود)
+لطفا یکی از گزینه‌های زیر را انتخاب کنید:
 """,
         reply_markup=VPN_KEYBOARD,
     )
@@ -312,9 +314,19 @@ async def vpn_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def vpn_test_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     query = update.callback_query
-    await query.answer()
 
     user = query.from_user
+
+    if has_received_trial(user.id):
+
+        await query.answer(
+            "❌ شما قبلاً اشتراک تست دریافت کرده‌اید.",
+            show_alert=True,
+        )
+
+        return
+
+    await query.answer()
 
     text = f"""🆕 درخواست اشتراک تست VPN
 
@@ -332,7 +344,8 @@ async def vpn_test_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [
             [
                 InlineKeyboardButton(
-                    "📤 ارسال کانفیگ", callback_data=f"send_config_{user.id}"
+                    "📤 ارسال کانفیگ",
+                    callback_data=f"send_config_{user.id}",
                 )
             ],
             [
@@ -344,7 +357,11 @@ async def vpn_test_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
     )
 
-    await context.bot.send_message(chat_id=ADMIN_ID, text=text, reply_markup=keyboard)
+    await context.bot.send_message(
+        chat_id=ADMIN_ID,
+        text=text,
+        reply_markup=keyboard,
+    )
 
     await query.edit_message_text("""✅ درخواست شما با موفقیت ثبت شد.
 
@@ -504,6 +521,9 @@ async def receive_vpn_config(update: Update, context: ContextTypes.DEFAULT_TYPE)
             reply_markup=keyboard,
         )
 
+        # ثبت دریافت تست در دیتابیس
+        set_trial_received(user_id)
+
         await update.message.reply_text(
             "✅ لینک اشتراک و کانفیگ با موفقیت برای کاربر ارسال شد."
         )
@@ -533,12 +553,7 @@ async def receive_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     success = 0
     failed = 0
 
-    try:
-        with open(USERS_FILE, "r", encoding="utf-8") as f:
-            users = [line.strip().split("|")[0] for line in f if line.strip()]
-
-    except FileNotFoundError:
-        users = []
+    users = get_users()
 
     for user_id in users:
 
@@ -554,19 +569,6 @@ async def receive_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except (Forbidden, BadRequest):
 
             failed += 1
-
-            try:
-
-                with open(USERS_FILE, "r", encoding="utf-8") as f:
-                    lines = f.readlines()
-
-                with open(USERS_FILE, "w", encoding="utf-8") as f:
-                    for line in lines:
-                        if not line.startswith(f"{user_id}|"):
-                            f.write(line)
-
-            except Exception:
-                pass
 
         except Exception:
 
@@ -1032,6 +1034,156 @@ async def buy_vpn(update: Update, context: ContextTypes.DEFAULT_TYPE):
 🙏 از صبر و همراهی شما متشکریم. ❤️""")
 
 
+# ------------------- referral menu ------------------
+
+
+@membership_required
+async def referral_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    user_id = update.effective_user.id
+
+    # موجودی واقعی
+    balance = get_balance(user_id)
+
+    # تعداد زیرمجموعه‌ها
+    referrals_count = get_referrals_count(user_id)
+
+    # لیست زیرمجموعه‌ها
+    referrals = get_referrals(user_id)
+
+    bot_username = (await context.bot.get_me()).username
+
+    ref_link = f"https://t.me/{bot_username}?start={user_id}"
+
+    share_text = quote(f"""👋 سلام!
+
+من از این ربات برای دریافت کانفیگ VPN استفاده می‌کنم و واقعاً ازش راضیم. 🚀
+
+🎁 اشتراک تست رایگان هم داره، اگر خواستی امتحانش کن 👇
+
+{ref_link}
+""")
+
+    keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "📤 اشتراک‌گذاری لینک دعوت",
+                    url=f"https://t.me/share/url?url=&text={share_text}",
+                )
+            ]
+        ]
+    )
+
+    # ساخت تاریخچه زیرمجموعه‌ها
+    if referrals:
+
+        history = "\n━━━━━━━━━━━━━━\n\n👥 <b>آخرین زیرمجموعه‌ها</b>\n\n"
+
+        for row in referrals[:10]:
+
+            name = row["full_name"] or "بدون نام"
+
+            if row["reward_paid"]:
+                status = "🟢"
+            else:
+                status = "🟡"
+
+            history += f"{status} {name}\n"
+
+    else:
+
+        history = "\n━━━━━━━━━━━━━━\n\n👥 هنوز هیچ زیرمجموعه‌ای ثبت نشده است."
+
+    await update.message.reply_text(
+        f"""
+👥 <b>پنل زیرمجموعه گیری</b>
+
+💳 اعتبار:
+<b>{balance:,} تومان</b>
+
+👤 زیرمجموعه‌های فعال:
+<b>{referrals_count} نفر</b>
+
+🎁 پاداش هر دعوت:
+<b>10,000 تومان</b>
+
+🔗 <b>لینک دعوت اختصاصی:</b>
+
+<code>{ref_link}</code>
+
+
+💬 لینک بالا را برای دوستان خود ارسال کنید.
+پس از عضویت آن‌ها در کانال و تأیید عضویت، به ازای هر نفر <b>۱۰,۰۰۰ تومان</b> اعتبار دریافت خواهید کرد.
+
+{history}
+""",
+        parse_mode="HTML",
+        reply_markup=keyboard,
+        disable_web_page_preview=True,
+    )
+
+
+# ------------------ profile ------------------
+
+
+@membership_required
+async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    user = update.effective_user
+
+    balance = get_balance(user.id)
+
+    referrals = get_referrals_count(user.id)
+
+    earnings = get_referral_earnings(user.id)
+
+    join_date = get_join_date(user.id)
+
+    if join_date:
+
+        dt = datetime.strptime(join_date, "%Y-%m-%d %H:%M:%S")
+
+        iran_time = dt + timedelta(hours=3, minutes=30)
+
+        join_text = iran_time.strftime("%Y/%m/%d - %H:%M")
+
+    else:
+
+        join_text = "نامشخص"
+
+    await update.message.reply_text(
+        f"""
+👤 <b>حساب کاربری</b>
+
+━━━━━━━━━━━━━━
+
+🆔 شناسه:
+<code>{user.id}</code>
+
+👤 نام:
+<b>{user.full_name}</b>
+
+💳 اعتبار کیف پول:
+<b>{balance:,} تومان</b>
+
+👥 تعداد زیرمجموعه‌های فعال:
+<b>{referrals}</b>
+
+💰 مجموع درآمد از دعوت:
+<b>{earnings:,} تومان</b>
+
+📅 تاریخ عضویت:
+<b>{join_text}</b>
+
+━━━━━━━━━━━━━━
+
+از همراهی شما سپاسگزاریم ❤️
+""",
+        parse_mode="HTML",
+    )
+
+
 # ------------------ check join callback ------------------
 
 
@@ -1043,6 +1195,32 @@ async def check_join_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     user_id = query.from_user.id
 
     if await check_membership(user_id, context):
+
+        # ---------------- Referral Reward ----------------
+
+        inviter_id = get_inviter(user_id)
+
+        if inviter_id and not reward_already_paid(user_id):
+
+            add_balance(inviter_id, 10000)
+
+            mark_reward_paid(user_id)
+
+            try:
+                await context.bot.send_message(
+                    chat_id=inviter_id,
+                    text="""
+🎉 تبریک!
+
+یک نفر با لینک دعوت شما عضو کانال شد. 🥳
+
+💳 مبلغ ۱۰٬۰۰۰ تومان به اعتبار حساب شما اضافه شد.
+""",
+                )
+            except Exception:
+                pass
+
+        # -----------------------------------------------
 
         await query.message.delete()
 
@@ -1133,15 +1311,7 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
 
-    try:
-
-        with open(USERS_FILE, "r", encoding="utf-8") as f:
-            users = [line for line in f.readlines() if line.strip()]
-
-        total_users = len(users)
-
-    except FileNotFoundError:
-        total_users = 0
+    total_users = get_users_count()
 
     await update.message.reply_text(
         f"""
@@ -1152,8 +1322,8 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 👥 تعداد کاربران:
 <b>{total_users}</b>
 
-📁 فایل کاربران:
-<code>{USERS_FILE}</code>
+🗄 پایگاه داده:
+<code>SQLite</code>
 
 ✅ وضعیت:
 <b>فعال</b>
@@ -1173,14 +1343,7 @@ async def admin_stats_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     if query.from_user.id != ADMIN_ID:
         return
 
-    try:
-        with open(USERS_FILE, "r", encoding="utf-8") as f:
-            users = [line for line in f.readlines() if line.strip()]
-
-        total_users = len(users)
-
-    except FileNotFoundError:
-        total_users = 0
+    total_users = get_users_count()
 
     await query.edit_message_text(
         f"""
@@ -1191,8 +1354,8 @@ async def admin_stats_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 👥 تعداد کاربران:
 <b>{total_users}</b>
 
-📁 فایل کاربران:
-<code>{USERS_FILE}</code>
+🗄 پایگاه داده:
+<code>SQLite</code>
 
 ✅ وضعیت:
 <b>فعال</b>
@@ -1244,6 +1407,11 @@ def get_handlers():
         MessageHandler(filters.Regex("^🔐 کانفیگ VPN$"), vpn_menu),
         MessageHandler(filters.Regex("^🎁 اشتراک تست$"), vpn_test),
         MessageHandler(filters.Regex("^💎 خرید اشتراک$"), buy_vpn),
+        MessageHandler(
+            filters.Regex("^👥 زیرمجموعه گیری$"),
+            referral_menu,
+        ),
+        MessageHandler(filters.Regex("^👤 حساب کاربری$"), profile),
         MessageHandler(filters.Regex("^📰 اخبار کریپتو$"), crypto_news),
         MessageHandler(filters.Regex("^💬 ارتباط با من$"), contact_me),
         CallbackQueryHandler(check_join_callback, pattern="^check_join$"),

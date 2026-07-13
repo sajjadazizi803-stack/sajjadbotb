@@ -2,9 +2,13 @@ from telegram.ext import Application
 
 from config import TOKEN
 from handlers import get_handlers
+from database import init_db
 
 
 def main():
+
+    # ساخت دیتابیس و جدول‌ها
+    init_db()
 
     app = Application.builder().token(TOKEN).build()
 
