@@ -24,6 +24,7 @@ from functools import wraps
 
 ADMIN_WAITING_FOR_CONFIG = {}
 ADMIN_WAITING_FOR_BROADCAST = set()
+ADMIN_WAITING_FOR_SUB = {}
 
 CHANNEL_USERNAME = "@SADSSCS"
 CHANNEL_LINK = "https://t.me/SADSSCS"
@@ -268,7 +269,7 @@ async def back_to_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-# ------------------- vpn config ------------------
+# ------------------- vpn menu ------------------
 
 
 @membership_required
@@ -280,7 +281,6 @@ async def vpn_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 یکی از گزینه‌های زیر را انتخاب کنید.
 
 🎁 اشتراک تست
-دریافت ۱۰ گیگ اینترنت با اعتبار ۳۰ روز
 
 💎 خرید اشتراک
 (به‌زودی فعال می‌شود)
@@ -298,14 +298,9 @@ async def vpn_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         """🎁 اشتراک تست رایگان
 
-به مناسبت استفاده از ربات، برای تمامی کاربران:
+برای دریافت اشتراک تست، روی دکمه زیر بزنید.
 
-📦 حجم: ۱۰ گیگ
-📅 اعتبار: ۳۰ روز
-
-در صورت رضایت می‌توانید اشتراک کامل تهیه کنید.
-
-برای ثبت درخواست روی دکمه زیر بزنید.""",
+پس از بررسی، اطلاعات اشتراک از طریق همین ربات برای شما ارسال خواهد شد.""",
         reply_markup=VPN_TEST_KEYBOARD,
     )
 
@@ -361,7 +356,6 @@ async def vpn_test_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ------------------ send config callback ------------------
 
 
-@membership_required
 async def send_config_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     query = update.callback_query
@@ -369,10 +363,34 @@ async def send_config_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 
     user_id = int(query.data.split("_")[-1])
 
-    ADMIN_WAITING_FOR_CONFIG[query.from_user.id] = user_id
+    ADMIN_WAITING_FOR_SUB[query.from_user.id] = user_id
 
     await query.message.reply_text(
-        "📤 لطفاً کانفیگ را ارسال کنید.\n\n" "کافی است متن کانفیگ را Paste کنید."
+        "📎 مرحله ۱ از ۲\n\n" "لطفاً لینک Subscription را ارسال کنید."
+    )
+
+
+# ------------------ receive subscription ------------------
+
+
+async def receive_subscription(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    admin_id = update.effective_user.id
+
+    if admin_id not in ADMIN_WAITING_FOR_SUB:
+        return
+
+    sub_link = update.message.text
+
+    user_id = ADMIN_WAITING_FOR_SUB.pop(admin_id)
+
+    ADMIN_WAITING_FOR_CONFIG[admin_id] = {
+        "user_id": user_id,
+        "sub": sub_link,
+    }
+
+    await update.message.reply_text(
+        "📄 مرحله ۲ از ۲\n\n" "حالا کانفیگ(ها) را ارسال کنید."
     )
 
 
@@ -427,12 +445,13 @@ async def receive_vpn_config(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     admin_id = update.effective_user.id
 
-    print(ADMIN_WAITING_FOR_CONFIG)
-
     if admin_id not in ADMIN_WAITING_FOR_CONFIG:
         return
 
-    user_id = ADMIN_WAITING_FOR_CONFIG[admin_id]
+    data = ADMIN_WAITING_FOR_CONFIG.pop(admin_id)
+
+    user_id = data["user_id"]
+    subscription = data["sub"]
 
     config_text = update.message.text
 
@@ -463,44 +482,37 @@ async def receive_vpn_config(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
         await context.bot.send_message(
             chat_id=user_id,
-            text=f"""
-🎉 <b>اشتراک تست شما آماده شد.</b>
+            text=f"""🎉 اشتراک تست شما آماده شد.
 
-━━━━━━━━━━━━━━
+⚙️ نوع: کانفیگ
+🟢 وضعیت: فعال
+♾️ مدت: 30 روز
+📦 حجم: ۵ گیگابایت
+⚡ سرعت: بالا
+🌐 ریجن: آمریکا 🇺🇸
 
-🎁 <b>اشتراک تست رایگان</b>
+🔗 لینک اشتراک:
 
-📦 حجم:
-<b>10 گیگابایت</b>
+<code>{subscription}</code>
 
-📅 اعتبار:
-<b>30 روز</b>
-
-━━━━━━━━━━━━━━
-
-🔐 <b>کانفیگ شما:</b>
+💻 کانفیگ‌ها:
 
 <code>{config_text}</code>
 
-━━━━━━━━━━━━━━
-
-⚠️ لطفاً این کانفیگ را در اختیار دیگران قرار ندهید.
-
-❤️ در صورت رضایت از کیفیت سرویس، می‌توانید اشتراک اصلی را تهیه کنید.
-""",
+💬 اگر در اتصال یا استفاده از سرویس مشکلی داشتید، به پشتیبانی پیام دهید.""",
             parse_mode="HTML",
             reply_markup=keyboard,
         )
 
-        await update.message.reply_text("✅ کانفیگ با موفقیت برای کاربر ارسال شد.")
+        await update.message.reply_text(
+            "✅ لینک اشتراک و کانفیگ با موفقیت برای کاربر ارسال شد."
+        )
 
     except Exception as e:
 
         print(e)
 
-        await update.message.reply_text("❌ ارسال کانفیگ با خطا مواجه شد.")
-
-    del ADMIN_WAITING_FOR_CONFIG[admin_id]
+        await update.message.reply_text("❌ ارسال اطلاعات برای کاربر با خطا مواجه شد.")
 
 
 # ------------------ receive broadcast ------------------
@@ -582,6 +594,10 @@ async def receive_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def admin_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     admin_id = update.effective_user.id
+
+    if admin_id in ADMIN_WAITING_FOR_SUB:
+        await receive_subscription(update, context)
+        return
 
     if admin_id in ADMIN_WAITING_FOR_CONFIG:
         await receive_vpn_config(update, context)
