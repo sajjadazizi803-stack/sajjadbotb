@@ -53,16 +53,15 @@ CHANNEL_LINK = "https://t.me/SADSSCS"
 
 MAIN_KEYBOARD = ReplyKeyboardMarkup(
     [
-        ["💬 ارتباط با من"],
-        ["🛠 خدمات"],
-        ["👨‍💻 درباره‌ی من"],
+        ["💬 ارتباط با پشتیبانی", "👤 حساب کاربری"],
+        ["🛠 خدمات", "👨‍💻 سازنده ربات"],
     ],
     resize_keyboard=True,
 )
 
 SERVICES_KEYBOARD = ReplyKeyboardMarkup(
     [
-        ["📰 اخبار کریپتو", "🔐 کانفیگ VPN"],
+        ["🌍 اخبار روز", "🔐 کانفیگ VPN"],
         ["🔙 بازگشت"],
     ],
     resize_keyboard=True,
@@ -71,14 +70,21 @@ SERVICES_KEYBOARD = ReplyKeyboardMarkup(
 VPN_KEYBOARD = ReplyKeyboardMarkup(
     [
         ["🎁 اشتراک تست", "💎 خرید اشتراک"],
-        ["👥 زیرمجموعه گیری", "👤 حساب کاربری"],
+        ["👥 زیرمجموعه گیری"],
         ["🔙 بازگشت"],
     ],
     resize_keyboard=True,
 )
 
 VPN_TEST_KEYBOARD = InlineKeyboardMarkup(
-    [[InlineKeyboardButton("📥 دریافت اشتراک تست", callback_data="vpn_test")]]
+    [
+        [
+            InlineKeyboardButton(
+                "📥 دریافت اشتراک تست",
+                callback_data="vpn_test",
+            )
+        ]
+    ]
 )
 
 # ------------------ check membership ------------------
@@ -227,17 +233,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await update.message.reply_text(
             """
-🌸 سلام دوست عزیز، خوش اومدی.
+👋 سلام به ربات خوش اومدید.
 
-برای استفاده از امکانات ربات، ابتدا باید عضو کانال رسمی ما بشی.
+برای استفاده از امکانات ربات، ابتدا باید در کانال‌های زیر عضو شوید. 📢
 
-🎁 مزایای عضویت:
-
-• دریافت اشتراک تست رایگان VPN
-• اطلاع از بروزرسانی‌های ربات
-• آموزش‌ها و اخبار
-
-👇 بعد از عضویت روی دکمه «✅ عضو شدم» بزن.
+پس از عضویت، روی دکمه «عضو شدم ✅️» کلیک کنید.
 """,
             reply_markup=keyboard,
         )
@@ -252,10 +252,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ------------------ ABOUT me ------------------
 
+from telegram.constants import ParseMode
+
 
 @membership_required
 async def about_me(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(ABOUT_TEXT)
+    await update.message.reply_text(
+        ABOUT_TEXT, parse_mode=ParseMode.HTML, disable_web_page_preview=True
+    )
 
 
 # ------------------ SERVICES ------------------
@@ -778,10 +782,9 @@ async def admin_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def crypto_news(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     waiting_message = await update.message.reply_text(
-        "🤖⏳\n\n"
-        "لطفاً کمی صبر کنید ....\n\n"
-        "📰 در حال دریافت و آماده‌سازی اخبار کریپتو هستیم.\n"
-        "این فرآیند ممکن است چند لحظه زمان ببرد 🙏✨"
+        "🌍📰\n\n"
+        "لطفاً کمی صبر کنید...\n\n"
+        "🤖 در حال دریافت و آماده‌سازی اخبار هستیم. ✨"
     )
 
     try:
@@ -1078,26 +1081,22 @@ async def referral_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ساخت تاریخچه زیرمجموعه‌ها
     if referrals:
 
-        history = "\n━━━━━━━━━━━━━━\n\n👥 <b>آخرین زیرمجموعه‌ها</b>\n\n"
+        history = "\n━━━━━━━━━━━━━━\n👥 <b>آخرین زیرمجموعه‌ها</b>\n\n"
 
         for row in referrals[:10]:
 
             name = row["full_name"] or "بدون نام"
 
-            if row["reward_paid"]:
-                status = "🟢"
-            else:
-                status = "🟡"
+            status = "🟢" if row["reward_paid"] else "🟡"
 
             history += f"{status} {name}\n"
 
     else:
 
-        history = "\n━━━━━━━━━━━━━━\n\n👥 هنوز هیچ زیرمجموعه‌ای ثبت نشده است."
+        history = "\n━━━━━━━━━━━━━━\n👥 هنوز هیچ زیرمجموعه‌ای ثبت نشده است."
 
     await update.message.reply_text(
-        f"""
-👥 <b>پنل زیرمجموعه گیری</b>
+        f"""👥 <b>پنل زیرمجموعه گیری</b>
 
 💳 اعتبار:
 <b>{balance:,} تومان</b>
@@ -1105,18 +1104,12 @@ async def referral_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 👤 زیرمجموعه‌های فعال:
 <b>{referrals_count} نفر</b>
 
-🎁 پاداش هر دعوت:
-<b>10,000 تومان</b>
-
 🔗 <b>لینک دعوت اختصاصی:</b>
 
 <code>{ref_link}</code>
 
-
-💬 لینک بالا را برای دوستان خود ارسال کنید.
-پس از عضویت آن‌ها در کانال و تأیید عضویت، به ازای هر نفر <b>۱۰,۰۰۰ تومان</b> اعتبار دریافت خواهید کرد.
-
-{history}
+<i>💬 لینک بالا را برای دوستان خود ارسال کنید.
+پس از عضویت آن‌ها در کانال و تأیید عضویت، به ازای هر نفر 10,000 تومان اعتبار دریافت خواهید کرد.</i>{history}
 """,
         parse_mode="HTML",
         reply_markup=keyboard,
@@ -1153,11 +1146,8 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         join_text = "نامشخص"
 
     await update.message.reply_text(
-        f"""
-👤 <b>حساب کاربری</b>
-
-━━━━━━━━━━━━━━
-
+        f"""👤 <b>حساب کاربری</b>
+➖️➖️➖️➖️➖️➖️➖️➖️➖️➖️➖️
 🆔 شناسه:
 <code>{user.id}</code>
 
@@ -1175,10 +1165,6 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 📅 تاریخ عضویت:
 <b>{join_text}</b>
-
-━━━━━━━━━━━━━━
-
-از همراهی شما سپاسگزاریم ❤️
 """,
         parse_mode="HTML",
     )
@@ -1226,7 +1212,11 @@ async def check_join_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
 
         await context.bot.send_message(
             chat_id=user_id,
-            text="🎉 عضویت شما تأیید شد.\n\nبه ربات خوش آمدید 🌸",
+            text="""✅ عضویت شما تایید شد.
+
+🎉 به ربات خوش اومدید
+
+🔮 برای ادامه، از دکمه‌های زیر استفاده کنید:""",
             reply_markup=MAIN_KEYBOARD,
         )
 
@@ -1401,7 +1391,7 @@ def get_handlers():
         CommandHandler("admin", admin_panel),
         CommandHandler("stats", stats),
         CommandHandler("start", start),
-        MessageHandler(filters.Regex("^👨‍💻 درباره‌ی من$"), about_me),
+        MessageHandler(filters.Regex("^👨‍💻 سازنده ربات$"), about_me),
         MessageHandler(filters.Regex("^🛠 خدمات$"), services),
         MessageHandler(filters.Regex("^🔙 بازگشت$"), back_to_main),
         MessageHandler(filters.Regex("^🔐 کانفیگ VPN$"), vpn_menu),
@@ -1412,8 +1402,8 @@ def get_handlers():
             referral_menu,
         ),
         MessageHandler(filters.Regex("^👤 حساب کاربری$"), profile),
-        MessageHandler(filters.Regex("^📰 اخبار کریپتو$"), crypto_news),
-        MessageHandler(filters.Regex("^💬 ارتباط با من$"), contact_me),
+        MessageHandler(filters.Regex("^🌍 اخبار روز$"), crypto_news),
+        MessageHandler(filters.Regex("^💬 ارتباط با پشتیبانی$"), contact_me),
         CallbackQueryHandler(check_join_callback, pattern="^check_join$"),
         CallbackQueryHandler(next_news, pattern="next_news"),
         CallbackQueryHandler(vpn_test_request, pattern="^vpn_test$"),
