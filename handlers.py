@@ -18,13 +18,15 @@ from telegram.ext import (
 
 from config import *
 
+import time
+import requests
+import base64
 import feedparser
 from telegram.error import Forbidden, BadRequest
 import requests
 from deep_translator import GoogleTranslator
 from functools import wraps
 from database import add_user, get_users, get_users_count
-from database import has_received_trial, set_trial_received
 from database import save_referral
 from database import get_referrals_count
 from database import save_referral, has_referral
@@ -34,11 +36,13 @@ from database import (
     mark_reward_paid,
     add_balance,
 )
-from database import get_balance
+from database import get_balance, deduct_balance
 from database import get_referrals
 from database import get_join_date
 from database import get_referral_earnings
+from database import set_last_subscription, get_last_subscription
 from urllib.parse import quote
+from nahan_api import create_nahan_user
 
 ADMIN_WAITING_FOR_CONFIG = {}
 ADMIN_WAITING_FOR_BROADCAST = set()
@@ -53,8 +57,9 @@ CHANNEL_LINK = "https://t.me/SADSSCS"
 
 MAIN_KEYBOARD = ReplyKeyboardMarkup(
     [
-        ["💬 ارتباط با پشتیبانی", "👤 حساب کاربری"],
-        ["🛠 خدمات", "👨‍💻 سازنده ربات"],
+        ["🛠 خدمات"],
+        ["💬 ارتباط با پشتیبانی", "👤 پروفایل"],
+        ["👨‍💻 سازنده ربات"],
     ],
     resize_keyboard=True,
 )
@@ -80,8 +85,8 @@ VPN_TEST_KEYBOARD = InlineKeyboardMarkup(
     [
         [
             InlineKeyboardButton(
-                "📥 دریافت اشتراک تست",
-                callback_data="vpn_test",
+                "🎁 دریافت اشتراک تست",
+                callback_data="vpn_test_request",
             )
         ]
     ]
@@ -300,14 +305,116 @@ async def vpn_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 @membership_required
 async def vpn_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    balance = get_balance(update.effective_user.id)
 
     await update.message.reply_text(
-        """🎁 اشتراک تست رایگان
+        f"""🎁 اشتراک تست
 
-برای دریافت اشتراک تست، روی دکمه زیر بزنید.
+💰 قیمت اشتراک تست: 5,000 تومان
+💳 اعتبار فعلی شما: {balance:,} تومان
 
-پس از بررسی، اطلاعات اشتراک از طریق همین ربات برای شما ارسال خواهد شد.""",
+📦 مشخصات اشتراک:
+• حجم: 1 گیگ
+• مدت: 30 روز
+
+👇 برای دریافت اشتراک، روی دکمه «🎁 دریافت اشتراک تست» بزنید.""",
         reply_markup=VPN_TEST_KEYBOARD,
+    )
+
+
+# ------------------ get first config ------------------
+
+
+def get_vless_configs(subscription_url):
+
+    try:
+
+        r = requests.get(subscription_url, timeout=20)
+
+        if r.status_code != 200:
+            return []
+
+        text = r.text.strip()
+
+        try:
+            decoded = base64.b64decode(text).decode("utf-8")
+        except Exception:
+            decoded = text
+
+        configs = []
+        seen = set()
+
+        for line in decoded.splitlines():
+
+            line = line.strip()
+
+            if not line.lower().startswith("vless://"):
+                continue
+
+            if line in seen:
+                continue
+
+            seen.add(line)
+            configs.append(line)
+
+        return configs
+
+    except Exception:
+        return []
+
+
+# ------------------ show configs ------------------
+
+
+async def show_configs(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    query = update.callback_query
+    await query.answer()
+
+    sub_link = get_last_subscription(query.from_user.id)
+
+    if not sub_link:
+
+        await query.answer(
+            "❌ اشتراکی برای شما پیدا نشد.",
+            show_alert=True,
+        )
+
+        return
+
+    configs = get_vless_configs(sub_link)
+
+    if not configs:
+
+        await query.answer(
+            "❌ کانفیگی برای نمایش پیدا نشد.",
+            show_alert=True,
+        )
+
+        return
+
+    text = "📄 <b>کانفیگ‌های VLESS</b>\n\n"
+
+    for i, cfg in enumerate(configs, start=1):
+
+        text += f"🇺🇸 <b>VLESS {i}</b>\n"
+        text += f"<code>{cfg}</code>\n\n"
+
+    keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "🔗 مشاهده لینک اشتراک",
+                    url=sub_link,
+                )
+            ]
+        ]
+    )
+
+    await query.message.reply_text(
+        text,
+        parse_mode="HTML",
+        reply_markup=keyboard,
     )
 
 
@@ -318,60 +425,139 @@ async def vpn_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def vpn_test_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     query = update.callback_query
+    await query.answer()
 
     user = query.from_user
 
-    if has_received_trial(user.id):
+    balance = get_balance(user.id)
+    price = 5000
 
-        await query.answer(
-            "❌ شما قبلاً اشتراک تست دریافت کرده‌اید.",
-            show_alert=True,
+    # اعتبار کافی نیست
+    if balance < price:
+
+        shortage = price - balance
+
+        keyboard = InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton(
+                        "👥 دعوت دوستان",
+                        callback_data="referral_menu",
+                    )
+                ]
+            ]
+        )
+
+        await query.edit_message_text(
+            f"""❌ اعتبار شما کافی نیست!
+
+💰 هزینه اشتراک: {price:,} تومان
+💳 اعتبار فعلی شما: {balance:,} تومان
+📉 اعتبار کمبود: {shortage:,} تومان
+
+✨ با دعوت دوستان اعتبار کسب کنید.""",
+            reply_markup=keyboard,
         )
 
         return
 
-    await query.answer()
+    # ساخت نام کاربری یکتا برای هر اشتراک
+    if user.username:
+        username = f"{user.username}_{int(time.time())}"
+    else:
+        username = f"{user.id}_{int(time.time())}"
 
-    text = f"""🆕 درخواست اشتراک تست VPN
+    # ساخت اشتراک
+    sub_link = create_nahan_user(
+        username=username,
+        traffic_gb=1,
+        expiry_days=30,
+    )
 
-👤 نام:
-{user.full_name}
+    if not sub_link:
 
-📛 یوزرنیم:
-@{user.username if user.username else "-"}
+        await query.edit_message_text(
+            "❌ خطا در ساخت اشتراک. لطفاً بعداً دوباره تلاش کنید."
+        )
 
-🆔 User ID:
-{user.id}
-"""
+        return
+
+    # دریافت کانفیگ‌ها
+    configs = get_vless_configs(sub_link)
+
+    # استخراج ریجن واقعی از اولین کانفیگ
+    region = "🌐"
+
+    if configs:
+
+        if "#" in configs[0]:
+
+            region = configs[0].split("#")[-1].strip()
+
+    # ذخیره لینک ساب در دیتابیس
+    set_last_subscription(user.id, sub_link)
+
+    # کسر اعتبار
+    deduct_balance(user.id, price)
+
+    new_balance = get_balance(user.id)
 
     keyboard = InlineKeyboardMarkup(
         [
             [
                 InlineKeyboardButton(
-                    "📤 ارسال کانفیگ",
-                    callback_data=f"send_config_{user.id}",
+                    "📄 مشاهده کانفیگ‌ها",
+                    callback_data="show_configs",
                 )
             ],
             [
                 InlineKeyboardButton(
-                    "❌ قبلاً تست دریافت کرده",
-                    callback_data=f"already_received_{user.id}",
-                )
+                    "📚 آموزش اتصال",
+                    callback_data="vpn_guide",
+                ),
+                InlineKeyboardButton(
+                    "💬 ارتباط با پشتیبانی",
+                    callback_data="contact_support",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    "🛒 خرید اشتراک",
+                    callback_data="buy_vpn",
+                ),
+                InlineKeyboardButton(
+                    "💰 افزایش اعتبار",
+                    callback_data="referral_menu",
+                ),
             ],
         ]
     )
 
-    await context.bot.send_message(
-        chat_id=ADMIN_ID,
-        text=text,
+    await query.edit_message_text(
+        f"""<i>🎉 اشتراک تست شما با موفقیت ایجاد شد.</i>
+
+💰 مبلغ کسر شده: <b>{price:,} تومان</b>
+💳 اعتبار باقی‌مانده: <b>{new_balance:,} تومان</b>
+
+📦 حجم: <b>1 GB</b>
+⏳ مدت: <b>30 روز</b>
+👥 اتصال همزمان: <b>نامحدود</b>
+🌍 ریجن: <b>{region}</b>
+
+🔗 لینک ساب:
+<code>{sub_link}</code>
+
+📄 کانفیگ‌ها:
+<b>برای مشاهده و کپی کانفیگ‌ها، روی دکمه شیشه‌ای «📄 مشاهده کانفیگ‌ها» بزنید.</b>
+
+━━━━━━━━━━━━━━
+<i>🤖 By: @{(await context.bot.get_me()).username}</i>
+
+<b>در صورت بروز هرگونه مشکل، از طریق دکمه «💬 پشتیبانی» با ما در ارتباط باشید.</b>
+""",
+        parse_mode="HTML",
         reply_markup=keyboard,
     )
-
-    await query.edit_message_text("""✅ درخواست شما با موفقیت ثبت شد.
-
-⏳ درخواست برای ادمین ارسال شد.
-
-پس از بررسی، اشتراک تست از طریق همین ربات برای شما ارسال خواهد شد.""")
 
 
 # ------------------ send config callback ------------------
@@ -524,9 +710,6 @@ async def receive_vpn_config(update: Update, context: ContextTypes.DEFAULT_TYPE)
             parse_mode="HTML",
             reply_markup=keyboard,
         )
-
-        # ثبت دریافت تست در دیتابیس
-        set_trial_received(user_id)
 
         await update.message.reply_text(
             "✅ لینک اشتراک و کانفیگ با موفقیت برای کاربر ارسال شد."
@@ -1043,7 +1226,11 @@ async def buy_vpn(update: Update, context: ContextTypes.DEFAULT_TYPE):
 @membership_required
 async def referral_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-    user_id = update.effective_user.id
+    if update.callback_query:
+        await update.callback_query.answer()
+        user_id = update.callback_query.from_user.id
+    else:
+        user_id = update.effective_user.id
 
     # موجودی واقعی
     balance = get_balance(user_id)
@@ -1060,9 +1247,9 @@ async def referral_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     share_text = quote(f"""👋 سلام!
 
-من از این ربات برای دریافت کانفیگ VPN استفاده می‌کنم و واقعاً ازش راضیم. 🚀
+من از این ربات استفاده می‌کنم و واقعاً از امکاناتش راضی‌ام. 🚀
 
-🎁 اشتراک تست رایگان هم داره، اگر خواستی امتحانش کن 👇
+اگر دوست داشتی، تو هم یه سر بهش بزن 👇
 
 {ref_link}
 """)
@@ -1095,8 +1282,7 @@ async def referral_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         history = "\n━━━━━━━━━━━━━━\n👥 هنوز هیچ زیرمجموعه‌ای ثبت نشده است."
 
-    await update.message.reply_text(
-        f"""👥 <b>پنل زیرمجموعه گیری</b>
+    text = f"""👥 <b>پنل زیرمجموعه گیری</b>
 
 💳 اعتبار:
 <b>{balance:,} تومان</b>
@@ -1110,11 +1296,22 @@ async def referral_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 <i>💬 لینک بالا را برای دوستان خود ارسال کنید.
 پس از عضویت آن‌ها در کانال و تأیید عضویت، به ازای هر نفر 10,000 تومان اعتبار دریافت خواهید کرد.</i>{history}
-""",
-        parse_mode="HTML",
-        reply_markup=keyboard,
-        disable_web_page_preview=True,
-    )
+"""
+
+    if update.callback_query:
+        await update.callback_query.message.reply_text(
+            text,
+            parse_mode="HTML",
+            reply_markup=keyboard,
+            disable_web_page_preview=True,
+        )
+    else:
+        await update.message.reply_text(
+            text,
+            parse_mode="HTML",
+            reply_markup=keyboard,
+            disable_web_page_preview=True,
+        )
 
 
 # ------------------ profile ------------------
@@ -1146,25 +1343,14 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         join_text = "نامشخص"
 
     await update.message.reply_text(
-        f"""👤 <b>حساب کاربری</b>
-➖️➖️➖️➖️➖️➖️➖️➖️➖️➖️➖️
-🆔 شناسه:
-<code>{user.id}</code>
+        f"""<b>🥇 پروفایل شما</b>
 
-👤 نام:
-<b>{user.full_name}</b>
-
-💳 اعتبار کیف پول:
-<b>{balance:,} تومان</b>
-
-👥 تعداد زیرمجموعه‌های فعال:
-<b>{referrals}</b>
-
-💰 مجموع درآمد از دعوت:
-<b>{earnings:,} تومان</b>
-
-📅 تاریخ عضویت:
-<b>{join_text}</b>
+🆔 شناسه: <code>{user.id}</code>
+👤 نام: <b>{user.full_name}</b>
+💳 موجودی: <b>{balance:,} تومان</b>
+👥 تعداد دعوت: <b>{referrals}</b>
+💰 مجموع درآمد از دعوت: <b>{earnings:,} تومان</b>
+📅 تاریخ عضویت: <b>{join_text}</b>
 """,
         parse_mode="HTML",
     )
@@ -1382,12 +1568,22 @@ async def admin_broadcast_callback(update: Update, context: ContextTypes.DEFAULT
     )
 
 
+# ------------------- test command ------------------
+
+
+async def test_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    status, result = create_nahan_user()
+
+    await update.message.reply_text(f"Status: {status}\n\n{result}")
+
+
 # ------------------- HANDLERS ------------------
 
 
 def get_handlers():
 
     return [
+        CommandHandler("test", test_command),
         CommandHandler("admin", admin_panel),
         CommandHandler("stats", stats),
         CommandHandler("start", start),
@@ -1401,12 +1597,13 @@ def get_handlers():
             filters.Regex("^👥 زیرمجموعه گیری$"),
             referral_menu,
         ),
-        MessageHandler(filters.Regex("^👤 حساب کاربری$"), profile),
+        MessageHandler(filters.Regex("^👤 پروفایل$"), profile),
         MessageHandler(filters.Regex("^🌍 اخبار روز$"), crypto_news),
         MessageHandler(filters.Regex("^💬 ارتباط با پشتیبانی$"), contact_me),
         CallbackQueryHandler(check_join_callback, pattern="^check_join$"),
         CallbackQueryHandler(next_news, pattern="next_news"),
-        CallbackQueryHandler(vpn_test_request, pattern="^vpn_test$"),
+        CallbackQueryHandler(vpn_test_request, pattern="^vpn_test_request$"),
+        CallbackQueryHandler(show_configs, pattern="^show_configs$"),
         CallbackQueryHandler(send_config_callback, pattern="^send_config_"),
         CallbackQueryHandler(already_received_callback, pattern="^already_received_"),
         CallbackQueryHandler(contact_support_callback, pattern="^contact_support$"),
@@ -1420,6 +1617,7 @@ def get_handlers():
         ),
         CallbackQueryHandler(vpn_guide_callback, pattern="^vpn_guide$"),
         CallbackQueryHandler(buy_vpn_callback, pattern="^buy_vpn$"),
+        CallbackQueryHandler(referral_menu, pattern="^referral_menu$"),
         # پاسخ ادمین به کاربران
         MessageHandler(
             filters.User(ADMIN_ID) & filters.REPLY & ~filters.COMMAND,

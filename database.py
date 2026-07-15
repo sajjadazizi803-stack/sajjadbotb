@@ -24,6 +24,7 @@ def init_db():
         username TEXT,
         full_name TEXT,
         balance INTEGER DEFAULT 0,
+        last_subscription TEXT DEFAULT NULL,
         trial_received INTEGER DEFAULT 0,
         joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
@@ -68,7 +69,7 @@ def add_user(user_id, username, full_name):
             user_id,
             username,
             full_name,
-            0,
+            5000,
         ),
     )
 
@@ -184,33 +185,10 @@ def add_balance(user_id, amount):
     conn.close()
 
 
-# ------------------ trial status ------------------
+# ------------------ deduct balance ------------------
 
 
-def has_received_trial(user_id):
-
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    cursor.execute(
-        "SELECT trial_received FROM users WHERE user_id = ?",
-        (user_id,),
-    )
-
-    row = cursor.fetchone()
-
-    conn.close()
-
-    if not row:
-        return False
-
-    return row["trial_received"] == 1
-
-
-# ------------------ set trial received ------------------
-
-
-def set_trial_received(user_id):
+def deduct_balance(user_id, amount):
 
     conn = get_connection()
     cursor = conn.cursor()
@@ -218,10 +196,13 @@ def set_trial_received(user_id):
     cursor.execute(
         """
         UPDATE users
-        SET trial_received = 1
-        WHERE user_id = ?
+        SET balance = balance - ?
+        WHERE user_id=?
         """,
-        (user_id,),
+        (
+            amount,
+            user_id,
+        ),
     )
 
     conn.commit()
@@ -427,3 +408,51 @@ def get_referrals(inviter_id):
     conn.close()
 
     return rows
+
+
+# ------------------ set last subscription ------------------
+
+
+def set_last_subscription(user_id, subscription_url):
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute(
+        """
+        UPDATE users
+        SET last_subscription = ?
+        WHERE user_id = ?
+        """,
+        (subscription_url, user_id),
+    )
+
+    conn.commit()
+    conn.close()
+
+
+# ------------------ get last subscribtion ------------------
+
+
+def get_last_subscription(user_id):
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute(
+        """
+        SELECT last_subscription
+        FROM users
+        WHERE user_id = ?
+        """,
+        (user_id,),
+    )
+
+    row = cur.fetchone()
+
+    conn.close()
+
+    if row:
+        return row["last_subscription"]
+
+    return None

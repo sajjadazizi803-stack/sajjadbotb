@@ -39,3 +39,6 @@ SERVICES_TEXT = """
 
 یکی از گزینه‌های زیر را انتخاب کنید.
 """
+
+NAHAN_API_URL = "https://polished-band-2e51.fdzgbfrhtt4a4.workers.dev/config2/api/users"
+NAHAN_API_KEY = "nahan_mrluuas0_e0dkadxb"
