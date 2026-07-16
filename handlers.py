@@ -44,6 +44,12 @@ from database import get_referral_earnings
 from database import set_last_subscription, get_last_subscription
 from urllib.parse import quote
 from nahan_api import create_nahan_user
+from nahan_api import rename_service
+from nahan_api import (
+    get_user_services,
+    get_service_by_id,
+    get_service_configs,
+)
 import jdatetime
 from datetime import datetime, timedelta
 
@@ -77,7 +83,8 @@ SERVICES_KEYBOARD = ReplyKeyboardMarkup(
 VPN_KEYBOARD = ReplyKeyboardMarkup(
     [
         ["🎁 اشتراک تست", "💎 خرید اشتراک"],
-        ["👥 زیرمجموعه گیری", "📚 آموزش اتصال"],
+        ["📦 اشتراک‌های من", "👥 زیرمجموعه گیری"],
+        ["📚 آموزش اتصال"],
         ["🔙 بازگشت"],
     ],
     resize_keyboard=True,
@@ -426,12 +433,132 @@ async def show_configs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+# ------------------ extend test subscription ------------------
+
+
+async def extend_test_subscription(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    query = update.callback_query
+    await query.answer()
+
+    service_name = "اشتراک تست"
+
+    text = context.user_data.get("subscription_text", "")
+
+    if "🆔️ نام سرویس:" in text:
+        try:
+            service_name = (
+                text.split("🆔️ نام سرویس:")[1]
+                .split("\n")[0]
+                .strip()
+                .replace("<b>", "")
+                .replace("</b>", "")
+            )
+        except:
+            pass
+
+    keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "⬅️ بازگشت",
+                    callback_data="back_to_subscription",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "💎 خرید اشتراک",
+                    callback_data="buy_subscription",
+                )
+            ],
+        ]
+    )
+
+    await query.edit_message_text(
+        f"""❌ <b>شما نمی‌توانید اشتراک تست را تمدید کنید!</b>
+
+🆔️ نام اشتراک: <b>{service_name}</b>
+
+🎁 این یک اشتراک تست رایگان است و قابلیت تمدید ندارد.
+
+✅ لطفاً برای ادامه استفاده، یک اشتراک جدید خریداری کنید.""",
+        parse_mode="HTML",
+        reply_markup=keyboard,
+    )
+
+
+# ------------------ buy subscription callback ------------------
+
+
+async def buy_subscription_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    query = update.callback_query
+    await query.answer()
+
+    await query.message.reply_text("""💎 خرید اشتراک
+
+🚧 این بخش در حال آماده‌سازی است.
+
+به‌زودی امکان خرید اشتراک از طریق ربات فعال خواهد شد.
+
+🙏 از صبر و همراهی شما متشکریم. ❤️""")
+
+
+# ------------------ rename service callback ------------------
+
+
+async def rename_service_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    query = update.callback_query
+    await query.answer()
+
+    context.user_data["waiting_for_service_name"] = True
+
+    await query.message.reply_text("""✏️ نام جدید سرویس را ارسال کنید.
+
+مثال:
+
+SAJJAD-USA
+
+❌ فقط از حروف انگلیسی، عدد و - استفاده کنید.""")
+
+
+# ------------------ receive new service name ------------------
+
+
+async def receive_new_service_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    if not context.user_data.get("waiting_for_service_name"):
+        return
+
+    context.user_data["waiting_for_service_name"] = False
+
+    new_name = update.message.text.strip()
+
+    old_name = context.user_data.get("service_name")
+
+    if not old_name:
+        await update.message.reply_text("❌ نام سرویس پیدا نشد.")
+        return
+
+    if rename_service(old_name, new_name):
+
+        context.user_data["service_name"] = new_name
+
+        await update.message.reply_text(
+            f"✅ نام سرویس با موفقیت تغییر کرد.\n\n🆕 {new_name}"
+        )
+
+    else:
+
+        await update.message.reply_text("❌ خطا در تغییر نام سرویس.")
+
+
 # ------------------ back to subscription ------------------
 
 
 @membership_required
 async def back_to_subscription(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
     query = update.callback_query
     await query.answer()
 
@@ -441,13 +568,27 @@ async def back_to_subscription(update: Update, context: ContextTypes.DEFAULT_TYP
                 InlineKeyboardButton(
                     "📄 مشاهده کانفیگ‌ها",
                     callback_data="show_configs",
-                )
-            ]
+                ),
+                InlineKeyboardButton(
+                    "🔗 باز کردن لینک ساب",
+                    url=context.user_data["sub_link"],
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    "🔄 تمدید اشتراک",
+                    callback_data="extend_test_subscription",
+                ),
+                InlineKeyboardButton(
+                    "✏️ تغییر نام سرویس",
+                    callback_data="rename_service",
+                ),
+            ],
         ]
     )
 
     await query.edit_message_text(
-        context.user_data["subscription_text"],
+        text=context.user_data["subscription_text"],
         parse_mode="HTML",
         reply_markup=keyboard,
     )
@@ -499,10 +640,7 @@ async def vpn_test_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ساخت نام سرویس
     random_id = random.randint(100, 999)
 
-    if user.username:
-        service_name = f"TEST-{user.username.upper()}-{random_id}"
-    else:
-        service_name = f"TEST-{user.id}-{random_id}"
+    service_name = f"TG-{user.id}-TEST-{random_id}"
 
     username = service_name
 
@@ -512,6 +650,8 @@ async def vpn_test_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
         traffic_gb=1,
         expiry_days=30,
     )
+
+    context.user_data["service_name"] = username
 
     if not sub_link:
 
@@ -571,6 +711,8 @@ async def vpn_test_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
 """
 
     context.user_data["subscription_text"] = subscription_text
+    context.user_data["sub_link"] = sub_link
+    context.user_data["subscription_name"] = service_name
 
     keyboard = InlineKeyboardMarkup(
         [
@@ -578,15 +720,29 @@ async def vpn_test_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 InlineKeyboardButton(
                     "📄 مشاهده کانفیگ‌ها",
                     callback_data="show_configs",
-                )
-            ]
+                ),
+                InlineKeyboardButton(
+                    "🔗 باز کردن لینک ساب",
+                    url=sub_link,
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    "🔄 تمدید اشتراک",
+                    callback_data="extend_test_subscription",
+                ),
+                InlineKeyboardButton(
+                    "✏️ تغییر نام سرویس",
+                    callback_data="rename_service",
+                ),
+            ],
         ]
     )
 
     await query.edit_message_text(
-        subscription_text,
-        parse_mode="HTML",
+        text=subscription_text,
         reply_markup=keyboard,
+        parse_mode="HTML",
     )
 
 
@@ -1389,6 +1545,87 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+# ------------------ my subscriptions ------------------
+
+
+@membership_required
+async def my_subscriptions(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    services = get_user_services(update.effective_user.id)
+
+    buttons = []
+
+    if isinstance(services, list):
+
+        for service in services:
+
+            service_name = service.get("name", "")
+
+            if service_name.startswith(f"TG-{update.effective_user.id}-"):
+
+                buttons.append(
+                    [
+                        InlineKeyboardButton(
+                            service_name,
+                            callback_data=f"subscription_{service.get('id')}",
+                        )
+                    ]
+                )
+
+    if not buttons:
+
+        buttons.append(
+            [
+                InlineKeyboardButton(
+                    "❌ سرویسی پیدا نشد",
+                    callback_data="no_subscription",
+                )
+            ]
+        )
+
+    keyboard = InlineKeyboardMarkup(buttons)
+
+    await update.message.reply_text(
+        """📦 <b>اشتراک‌های فعال من</b>
+
+لیست سرویس‌های شما آماده است.
+برای دیدن جزئیات، روی سرویس موردنظر بزنید.""",
+        parse_mode="HTML",
+        reply_markup=keyboard,
+    )
+
+
+# ------------------ subscription details ------------------
+
+
+@membership_required
+async def subscription_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    query = update.callback_query
+    await query.answer()
+
+    service_id = query.data.replace("subscription_", "")
+
+    service = get_service_by_id(service_id)
+    configs = get_service_configs(service_id)
+
+    print(configs)
+
+    if not service:
+
+        await query.edit_message_text("❌ سرویس پیدا نشد.")
+        return
+
+    print(service)
+    await query.edit_message_text(f"""📦 اطلاعات سرویس
+
+🆔 نام سرویس:
+{service.get("name")}
+
+📅 وضعیت:
+{service.get("status")}""")
+
+
 # ------------------ check join callback ------------------
 
 
@@ -1610,6 +1847,20 @@ async def test_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"Status: {status}\n\n{result}")
 
 
+# ------------------ rename service ------------------
+
+
+@membership_required
+async def rename_service_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    query = update.callback_query
+
+    await query.answer(
+        "🚧 این قابلیت در حال حاضر غیرفعال است و به‌زودی فعال خواهد شد.",
+        show_alert=True,
+    )
+
+
 # ------------------- HANDLERS ------------------
 
 
@@ -1636,14 +1887,23 @@ def get_handlers():
         ),
         MessageHandler(filters.Regex("^👤 پروفایل$"), profile),
         MessageHandler(filters.Regex("^🌍 اخبار روز$"), crypto_news),
+        MessageHandler(filters.Regex("^📦 اشتراک‌های من$"), my_subscriptions),
         MessageHandler(filters.Regex("^💬 ارتباط با پشتیبانی$"), contact_me),
         CallbackQueryHandler(check_join_callback, pattern="^check_join$"),
         CallbackQueryHandler(next_news, pattern="next_news"),
         CallbackQueryHandler(vpn_test_request, pattern="^vpn_test_request$"),
         CallbackQueryHandler(show_configs, pattern="^show_configs$"),
+        CallbackQueryHandler(buy_subscription_callback, pattern="^buy_subscription$"),
+        CallbackQueryHandler(
+            extend_test_subscription, pattern="^extend_test_subscription$"
+        ),
         CallbackQueryHandler(
             back_to_subscription,
             pattern="^back_to_subscription$",
+        ),
+        CallbackQueryHandler(
+            subscription_details,
+            pattern="^subscription_",
         ),
         CallbackQueryHandler(send_config_callback, pattern="^send_config_"),
         CallbackQueryHandler(already_received_callback, pattern="^already_received_"),
@@ -1659,6 +1919,7 @@ def get_handlers():
         CallbackQueryHandler(vpn_guide_callback, pattern="^vpn_guide$"),
         CallbackQueryHandler(buy_vpn_callback, pattern="^buy_vpn$"),
         CallbackQueryHandler(referral_menu, pattern="^referral_menu$"),
+        CallbackQueryHandler(rename_service_callback, pattern="^rename_service$"),
         # پاسخ ادمین به کاربران
         MessageHandler(
             filters.User(ADMIN_ID) & filters.REPLY & ~filters.COMMAND,
@@ -1672,5 +1933,9 @@ def get_handlers():
         MessageHandler(
             ~filters.User(ADMIN_ID) & filters.ALL & ~filters.COMMAND,
             forward_to_admin,
+        ),
+        MessageHandler(
+            filters.TEXT & ~filters.COMMAND,
+            receive_new_service_name,
         ),
     ]
