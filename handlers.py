@@ -50,6 +50,7 @@ from nahan_api import (
     get_service_by_id,
     get_service_configs,
 )
+from nahan_api import test_patch_user, test_api_root
 import jdatetime
 from datetime import datetime, timedelta
 
@@ -384,9 +385,17 @@ async def show_configs(update: Update, context: ContextTypes.DEFAULT_TYPE):
         show_alert=False,
     )
 
-    sub_link = get_last_subscription(query.from_user.id)
+    # اگر از صفحه اشتراک‌ها آمده باشد
+    if query.data.startswith("show_configs_"):
+
+        sub_link = context.user_data.get("subscription_sub_link")
+
+    else:
+        # اگر از پیام ساخت اشتراک آمده باشد
+        sub_link = get_last_subscription(query.from_user.id)
 
     if not sub_link:
+
         await query.answer(
             "❌ اشتراکی برای شما پیدا نشد.",
             show_alert=True,
@@ -396,6 +405,7 @@ async def show_configs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     configs = get_vless_configs(sub_link)
 
     if not configs:
+
         await query.answer(
             "❌ کانفیگی برای نمایش پیدا نشد.",
             show_alert=True,
@@ -408,7 +418,7 @@ async def show_configs(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [
             [
                 InlineKeyboardButton(
-                    "⬅️ بازگشت به مدیریت",
+                    "⬅️ بازگشت",
                     callback_data="back_to_subscription",
                 )
             ]
@@ -416,20 +426,22 @@ async def show_configs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     await query.edit_message_text(
-        f"""📄 <b>کانفیگ‌های شما</b>
+        f"""📄 <b>کانفیگ‌های VLESS</b>
 
 <code>{all_configs}</code>
 
 
-<b>📋 روی متن بالا ضربه بزنید تا همه کانفیگ‌ها یکجا کپی شوند.</b>
-
-این کانفیگ را داخل برنامه‌های
+<b>📋 برای کپی، روی متن بالا ضربه بزنید.</b>
+این کانفیگ‌ها را می‌توانید در
 <b>V2RayNG</b>،
-<b>NekoBox</b>
-یا سایر نرم‌افزارهای سازگار وارد کنید.
+<b>NekoBox</b>،
+<b>V2Box</b>،
+<b>Hiddify</b>
+و سایر کلاینت‌های سازگار وارد کنید.
 """,
         parse_mode="HTML",
         reply_markup=keyboard,
+        disable_web_page_preview=True,
     )
 
 
@@ -559,38 +571,46 @@ async def receive_new_service_name(update: Update, context: ContextTypes.DEFAULT
 
 @membership_required
 async def back_to_subscription(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
     query = update.callback_query
     await query.answer()
+
+    service_id = context.user_data.get("subscription_service_id")
+    sub_link = context.user_data.get("subscription_sub_link")
+    text = context.user_data.get("subscription_text")
 
     keyboard = InlineKeyboardMarkup(
         [
             [
                 InlineKeyboardButton(
                     "📄 مشاهده کانفیگ‌ها",
-                    callback_data="show_configs",
+                    callback_data=f"show_configs_{service_id}",
                 ),
+            ],
+            [
                 InlineKeyboardButton(
                     "🔗 باز کردن لینک ساب",
-                    url=context.user_data["sub_link"],
+                    url=sub_link,
                 ),
             ],
             [
                 InlineKeyboardButton(
                     "🔄 تمدید اشتراک",
-                    callback_data="extend_test_subscription",
+                    callback_data=f"renew_{service_id}",
                 ),
                 InlineKeyboardButton(
                     "✏️ تغییر نام سرویس",
-                    callback_data="rename_service",
+                    callback_data=f"rename_{service_id}",
                 ),
             ],
         ]
     )
 
     await query.edit_message_text(
-        text=context.user_data["subscription_text"],
+        text=text,
         parse_mode="HTML",
         reply_markup=keyboard,
+        disable_web_page_preview=True,
     )
 
 
@@ -1607,23 +1627,133 @@ async def subscription_details(update: Update, context: ContextTypes.DEFAULT_TYP
     service_id = query.data.replace("subscription_", "")
 
     service = get_service_by_id(service_id)
-    configs = get_service_configs(service_id)
-
-    print(configs)
+    test_api_root()
+    test_patch_user(service_id)
 
     if not service:
-
         await query.edit_message_text("❌ سرویس پیدا نشد.")
         return
 
-    print(service)
-    await query.edit_message_text(f"""📦 اطلاعات سرویس
+    # اطلاعات سرویس
+    name = service.get("name", "-")
+    status = "فعال ✅" if service.get("status") == "active" else "غیرفعال ❌"
 
-🆔 نام سرویس:
-{service.get("name")}
+    usage = service.get("usage", {})
 
-📅 وضعیت:
-{service.get("status")}""")
+    used = usage.get("total", 0) / (1024**3)
+    total = usage.get("limit", 0) / (1024**3)
+    remain = max(total - used, 0)
+
+    expiry = service.get("expiryMs")
+    created = service.get("createdAt")
+
+    created_dt = datetime.fromtimestamp(created / 1000)
+    expiry_dt = datetime.fromtimestamp(expiry / 1000)
+
+    created_shamsi = jdatetime.datetime.fromgregorian(datetime=created_dt).strftime(
+        "%Y/%m/%d - %H:%M"
+    )
+
+    expiry_shamsi = jdatetime.datetime.fromgregorian(datetime=expiry_dt).strftime(
+        "%Y/%m/%d - %H:%M"
+    )
+
+    days_left = (expiry_dt - datetime.now()).days
+
+    if days_left < 0:
+        days_left = 0
+
+    # اتصال همزمان
+    conn = service.get("connLimit")
+
+    if conn in (None, 0):
+        conn_text = "نامحدود"
+    else:
+        conn_text = str(conn)
+
+    # لینک ساب و ریجن
+    sub_link = "-"
+    region = "🌐"
+
+    try:
+        sub_link = get_last_subscription(query.from_user.id)
+
+        if sub_link:
+
+            configs = get_vless_configs(sub_link)
+
+            if configs and "#" in configs[0]:
+                region = configs[0].split("#")[-1]
+
+    except Exception:
+        pass
+
+    text = f"""<i>📦 اطلاعات سرویس</i>
+
+🆔️ نام سرویس: <b>{name}</b>
+📅 تاریخ خرید: <b>{created_shamsi}</b>
+🗓 تاریخ پایان: <b>{expiry_shamsi}</b>
+
+🔮 وضعیت: <b>{status}</b>
+
+📦 حجم کل: <b>{total:.2f} GB</b>
+📤 مصرف شده: <b>{used:.2f} GB</b>
+📥 حجم باقی‌مانده: <b>{remain:.2f} GB</b>
+⏳ زمان باقی‌مانده: <b>{days_left} روز</b>
+👥 اتصال همزمان: <b>{conn_text}</b>
+🌍 ریجن: <b>{region}</b>
+
+🔗 لینک ساب:
+<code>{sub_link}</code>
+
+📄 کانفیگ‌ها:
+<b>برای مشاهده و کپی کانفیگ‌ها، روی دکمه «📄 مشاهده کانفیگ‌ها» بزنید.</b>
+
+━━━━━━━━━━━━━━
+<i>🤖 By: @{(await context.bot.get_me()).username}</i>
+
+<b>در صورت بروز هرگونه مشکل، از طریق دکمه «💬 ارتباط با پشتیبانی» با ما در ارتباط باشید.</b>
+"""
+
+    # ذخیره اطلاعات برای برگشت و عملیات بعدی
+    context.user_data["subscription_text"] = text
+    context.user_data["subscription_service_id"] = service_id
+    context.user_data["subscription_sub_link"] = sub_link
+    context.user_data["subscription_name"] = name
+
+    keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "📄 مشاهده کانفیگ‌ها",
+                    callback_data=f"show_configs_{service_id}",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    "🔗 باز کردن لینک ساب",
+                    url=sub_link,
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    "🔄 تمدید اشتراک",
+                    callback_data=f"renew_{service_id}",
+                ),
+                InlineKeyboardButton(
+                    "✏️ تغییر نام سرویس",
+                    callback_data=f"rename_{service_id}",
+                ),
+            ],
+        ]
+    )
+
+    await query.edit_message_text(
+        text,
+        parse_mode="HTML",
+        reply_markup=keyboard,
+        disable_web_page_preview=True,
+    )
 
 
 # ------------------ check join callback ------------------
@@ -1892,7 +2022,10 @@ def get_handlers():
         CallbackQueryHandler(check_join_callback, pattern="^check_join$"),
         CallbackQueryHandler(next_news, pattern="next_news"),
         CallbackQueryHandler(vpn_test_request, pattern="^vpn_test_request$"),
-        CallbackQueryHandler(show_configs, pattern="^show_configs$"),
+        CallbackQueryHandler(
+            show_configs,
+            pattern=r"^show_configs",
+        ),
         CallbackQueryHandler(buy_subscription_callback, pattern="^buy_subscription$"),
         CallbackQueryHandler(
             extend_test_subscription, pattern="^extend_test_subscription$"
@@ -1919,7 +2052,14 @@ def get_handlers():
         CallbackQueryHandler(vpn_guide_callback, pattern="^vpn_guide$"),
         CallbackQueryHandler(buy_vpn_callback, pattern="^buy_vpn$"),
         CallbackQueryHandler(referral_menu, pattern="^referral_menu$"),
-        CallbackQueryHandler(rename_service_callback, pattern="^rename_service$"),
+        CallbackQueryHandler(
+            rename_service_callback,
+            pattern=r"^rename",
+        ),
+        CallbackQueryHandler(
+            extend_test_subscription,
+            pattern="^renew_",
+        ),
         # پاسخ ادمین به کاربران
         MessageHandler(
             filters.User(ADMIN_ID) & filters.REPLY & ~filters.COMMAND,

@@ -102,6 +102,7 @@ def get_service_by_id(service_id):
 
             if service.get("id") == service_id:
 
+                print(service)
                 return service
 
     return None
@@ -123,7 +124,51 @@ def get_service_configs(service_id):
         timeout=20,
     )
 
-    print(response.status_code)
+    print("STATUS:", response.status_code)
+    print("BODY:")
     print(response.text)
 
-    return response.json()
+    return response.text
+
+
+# ------------------- test patch user ------------------
+
+
+def test_patch_user(service_id):
+
+    headers = {
+        "Authorization": f"Bearer {config.NAHAN_API_KEY}",
+        "Content-Type": "application/json",
+    }
+
+    payload = {"name": "TEST-NAME"}
+
+    response = requests.patch(
+        f"{config.NAHAN_API_URL}/{service_id}/name",
+        headers=headers,
+        json=payload,
+        timeout=20,
+    )
+
+    print("STATUS:", response.status_code)
+    print("TEXT:", response.text)
+
+
+# ------------------- test api root ------------------
+
+
+def test_api_root():
+
+    headers = {
+        "Authorization": f"Bearer {config.NAHAN_API_KEY}",
+    }
+
+    response = requests.get(
+        config.NAHAN_API_URL.replace("/users", "/openapi.json"),
+        headers=headers,
+        timeout=20,
+    )
+
+    print("========== BODY ==========")
+    print(response.text)
+    print("========== END ==========")
