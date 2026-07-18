@@ -29,7 +29,7 @@ def create_nahan_user(username, traffic_gb=1, expiry_days=30):
 # ------------------- rename service ------------------
 
 
-def rename_service(old_name, new_name):
+def rename_service(service_id, new_name):
 
     headers = {
         "Authorization": f"Bearer {config.NAHAN_API_KEY}",
@@ -37,18 +37,27 @@ def rename_service(old_name, new_name):
     }
 
     data = {
-        "oldName": old_name,
-        "newName": new_name,
+        "name": new_name,
     }
 
-    r = requests.post(
-        f"{config.NAHAN_API_URL}/rename",
+    response = requests.put(
+        f"{config.NAHAN_API_URL}?id={service_id}",
         headers=headers,
         json=data,
         timeout=20,
     )
 
-    return r.status_code == 200
+    print("STATUS:", response.status_code)
+    print("TEXT:", response.text)
+
+    if response.status_code != 200:
+        return False
+
+    try:
+        result = response.json()
+        return result.get("success", False)
+    except Exception:
+        return False
 
 
 # ------------------- get user services ------------------
