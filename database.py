@@ -41,16 +41,29 @@ def init_db():
     )
     """)
 
+    # جدول سرویس‌های کاربران
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS user_services (
+        service_id TEXT PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        service_name TEXT NOT NULL,
+        subscription_url TEXT NOT NULL,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(user_id) REFERENCES users(user_id)
+    )
+    """)
+
     conn.commit()
     conn.close()
+
+    add_region_column()
+    add_configs_column()
 
 
 # ------------------ add user ------------------
 
 
 def add_user(user_id, username, full_name):
-
-    print("ADD USER:", user_id, username, full_name)
 
     conn = get_connection()
     cursor = conn.cursor()
@@ -410,49 +423,326 @@ def get_referrals(inviter_id):
     return rows
 
 
-# ------------------ set last subscription ------------------
+# ------------------ save user service ------------------
 
 
-def set_last_subscription(user_id, subscription_url):
+def save_user_service(user_id, service_id):
 
     conn = get_connection()
-    cur = conn.cursor()
+    cursor = conn.cursor()
 
-    cur.execute(
+    cursor.execute(
         """
-        UPDATE users
-        SET last_subscription = ?
-        WHERE user_id = ?
+        INSERT OR REPLACE INTO user_services (service_id, user_id)
+        VALUES (?, ?)
         """,
-        (subscription_url, user_id),
+        (service_id, user_id),
     )
 
     conn.commit()
     conn.close()
 
 
-# ------------------ get last subscribtion ------------------
+# ------------------ get user service ids ------------------
 
 
-def get_last_subscription(user_id):
+def get_user_service_ids(user_id):
 
     conn = get_connection()
-    cur = conn.cursor()
+    cursor = conn.cursor()
 
-    cur.execute(
+    cursor.execute(
         """
-        SELECT last_subscription
-        FROM users
+        SELECT service_id
+        FROM user_services
         WHERE user_id = ?
         """,
         (user_id,),
     )
 
-    row = cur.fetchone()
+    rows = cursor.fetchall()
 
     conn.close()
 
-    if row:
-        return row["last_subscription"]
+    return [row[0] for row in rows]
 
-    return None
+
+# ------------------ save user service ------------------
+
+
+def save_user_service(service_id, user_id, service_name, subscription_url):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        INSERT OR REPLACE INTO user_services
+        (service_id, user_id, service_name, subscription_url)
+        VALUES (?, ?, ?, ?)
+    """,
+        (service_id, user_id, service_name, subscription_url),
+    )
+
+    conn.commit()
+    conn.close()
+
+
+# ------------------ get subscription by service ------------------
+
+
+def get_subscription_by_service(service_id):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        SELECT subscription_url
+        FROM user_services
+        WHERE service_id=?
+    """,
+        (service_id,),
+    )
+
+    row = cursor.fetchone()
+
+    conn.close()
+
+    return row[0] if row else None
+
+
+# ------------------ get service by nabe ------------------
+
+
+def get_service_by_name(service_name):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        SELECT service_id, subscription_url
+        FROM user_services
+        WHERE service_name=?
+    """,
+        (service_name,),
+    )
+
+    row = cursor.fetchone()
+
+    conn.close()
+
+    return row
+
+
+# ------------------ get subscription by service name ------------------
+
+
+def get_subscription_by_service_name(service_name):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        SELECT subscription_url
+        FROM user_services
+        WHERE service_name=?
+    """,
+        (service_name,),
+    )
+
+    row = cursor.fetchone()
+
+    conn.close()
+
+    return row[0] if row else None
+
+
+# ------------------ get user service ------------------
+
+
+def get_user_services(user_id):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        SELECT service_id, service_name, subscription_url
+        FROM user_services
+        WHERE user_id=?
+        ORDER BY created_at DESC
+    """,
+        (user_id,),
+    )
+
+    rows = cursor.fetchall()
+
+    conn.close()
+
+    return rows
+
+
+# ------------------ update service name ------------------
+
+
+def update_service_name(service_id, new_name):
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        UPDATE user_services
+        SET service_name=?
+        WHERE service_id=?
+        """,
+        (new_name, service_id),
+    )
+
+    conn.commit()
+    conn.close()
+
+
+# ------------------ add region column ------------------
+
+
+def add_region_column():
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("ALTER TABLE user_services ADD COLUMN region TEXT DEFAULT '🌐'")
+        conn.commit()
+    except Exception:
+        pass
+
+    conn.close()
+
+
+# ------------------ update service region ------------------
+
+
+def update_service_region(service_id, region):
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        UPDATE user_services
+        SET region=?
+        WHERE service_id=?
+        """,
+        (region, service_id),
+    )
+
+    conn.commit()
+    conn.close()
+
+
+# ------------------ get service region ------------------
+
+
+def get_service_region(service_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        SELECT configs, region
+        FROM user_services
+        WHERE service_id=?
+        """,
+        (service_id,),
+    )
+
+    row = cursor.fetchone()
+
+    conn.close()
+
+    if not row:
+        return "🌐"
+
+    configs = row[0] or ""
+    saved_region = row[1] or "🌐"
+
+    if not configs.strip():
+        return saved_region
+
+    regions = []
+    seen = set()
+
+    for line in configs.splitlines():
+        line = line.strip()
+
+        if "#" not in line:
+            continue
+
+        region = line.split("#", 1)[1].split("|", 1)[0].strip()
+
+        if region and region not in seen:
+            seen.add(region)
+            regions.append(region)
+
+    if regions:
+        return "\n".join(regions)
+
+    return saved_region
+
+
+# ------------------ add configs column ------------------
+
+
+def add_configs_column():
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("ALTER TABLE user_services ADD COLUMN configs TEXT DEFAULT ''")
+        conn.commit()
+    except Exception:
+        pass
+
+    conn.close()
+
+
+# ------------------ update service configs ------------------
+
+
+def update_service_configs(service_id, configs):
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        UPDATE user_services
+        SET configs=?
+        WHERE service_id=?
+        """,
+        ("\n".join(configs), service_id),
+    )
+
+    conn.commit()
+    conn.close()
+
+
+# ------------------ get service configs db ------------------
+
+
+def get_service_configs_db(service_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        SELECT configs
+        FROM user_services
+        WHERE service_id=?
+        """,
+        (service_id,),
+    )
+
+    row = cursor.fetchone()
+
+    conn.close()
+
+    if not row or not row[0]:
+        return []
+
+    return row[0].split("\n")

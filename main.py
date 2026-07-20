@@ -1,8 +1,9 @@
-from telegram.ext import Application
-
+from telegram.ext import Application, TypeHandler
+from telegram import Update
 from config import TOKEN
 from handlers import get_handlers
 from database import init_db
+from handlers import global_membership_check
 
 
 def main():
@@ -11,6 +12,9 @@ def main():
     init_db()
 
     app = Application.builder().token(TOKEN).build()
+
+    # چک عضویت سراسری قبل از اجرای هر هندلر دیگر
+    app.add_handler(TypeHandler(Update, global_membership_check), group=-1)
 
     for handler in get_handlers():
         app.add_handler(handler)

@@ -1,6 +1,8 @@
 import requests
 import config
 
+# ------------------- create nahan user ------------------
+
 
 def create_nahan_user(username, traffic_gb=1, expiry_days=30):
 
@@ -16,12 +18,20 @@ def create_nahan_user(username, traffic_gb=1, expiry_days=30):
         "connLimit": 0,
     }
 
-    r = requests.post(config.NAHAN_API_URL, headers=headers, json=data, timeout=20)
+    r = requests.post(
+        config.NAHAN_API_URL,
+        headers=headers,
+        json=data,
+        timeout=20,
+    )
 
     if r.status_code == 201:
         result = r.json()
-        print(result)
-        return result.get("subscriptionUrl")
+
+        return {
+            "subscription_url": result.get("subscriptionUrl"),
+            "service_id": result.get("user", {}).get("id"),
+        }
 
     return None
 
@@ -46,9 +56,6 @@ def rename_service(service_id, new_name):
         json=data,
         timeout=20,
     )
-
-    print("STATUS:", response.status_code)
-    print("TEXT:", response.text)
 
     if response.status_code != 200:
         return False
@@ -75,9 +82,6 @@ def get_user_services(user_id):
         headers=headers,
         timeout=20,
     )
-
-    print(response.status_code)
-    print(response.text)
 
     data = response.json()
 
@@ -111,7 +115,6 @@ def get_service_by_id(service_id):
 
             if service.get("id") == service_id:
 
-                print(service)
                 return service
 
     return None
@@ -132,10 +135,6 @@ def get_service_configs(service_id):
         headers=headers,
         timeout=20,
     )
-
-    print("STATUS:", response.status_code)
-    print("BODY:")
-    print(response.text)
 
     return response.text
 
@@ -159,9 +158,6 @@ def test_patch_user(service_id):
         timeout=20,
     )
 
-    print("STATUS:", response.status_code)
-    print("TEXT:", response.text)
-
 
 # ------------------- test api root ------------------
 
@@ -177,7 +173,3 @@ def test_api_root():
         headers=headers,
         timeout=20,
     )
-
-    print("========== BODY ==========")
-    print(response.text)
-    print("========== END ==========")
