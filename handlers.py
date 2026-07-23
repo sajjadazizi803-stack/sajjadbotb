@@ -4,6 +4,15 @@ import random
 import base64
 from functools import wraps
 from urllib.parse import quote
+from config import ADMIN_ID
+from telegram import ReplyKeyboardRemove
+from market_api import get_market_prices
+
+from telegram import (
+    BotCommand,
+    BotCommandScopeChat,
+    BotCommandScopeDefault,
+)
 
 import feedparser
 import jdatetime
@@ -43,6 +52,8 @@ from database import (
     get_balance,
     deduct_balance,
     get_referrals,
+    set_news,
+    get_news,
     get_join_date,
     get_referral_earnings,
     save_user_service,
@@ -75,6 +86,24 @@ CHANNEL_USERNAME = "@SADSSCS"
 CHANNEL_LINK = "https://t.me/SADSSCS"
 
 
+# ------------------ admin only ------------------
+
+from functools import wraps
+
+
+def admin_only(func):
+
+    @wraps(func)
+    async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+        if update.effective_user.id != ADMIN_ID:
+            return
+
+        return await func(update, context)
+
+    return wrapper
+
+
 # ------------------ KEYBOARDS ------------------
 
 MAIN_KEYBOARD = ReplyKeyboardMarkup(
@@ -88,7 +117,7 @@ MAIN_KEYBOARD = ReplyKeyboardMarkup(
 
 SERVICES_KEYBOARD = ReplyKeyboardMarkup(
     [
-        ["🌍 اخبار روز", "🔐 کانفیگ VPN"],
+        ["🛰️ داشبورد اخبار راهبردی", "🔐 کانفیگ VPN"],
         ["🔙 بازگشت"],
     ],
     resize_keyboard=True,
@@ -302,10 +331,18 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         return
 
-    await update.message.reply_text(
-        "🎉 به ربات خوش آمدید.",
-        reply_markup=MAIN_KEYBOARD,
-    )
+    if update.effective_chat.type == "private":
+
+        await update.message.reply_text(
+            "🎉 به ربات خوش آمدید.",
+            reply_markup=MAIN_KEYBOARD,
+        )
+
+    else:
+
+        await update.message.reply_text(
+            "🎉 به ربات خوش آمدید.",
+        )
 
 
 # ------------------ ABOUT me ------------------
@@ -328,14 +365,23 @@ async def services(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(SERVICES_TEXT, reply_markup=SERVICES_KEYBOARD)
 
 
-# ------------------ back to nenu ------------------
+# ------------------ back to main ------------------
 
 
 @membership_required
 async def back_to_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "به منوی اصلی بازگشتید.", reply_markup=MAIN_KEYBOARD
-    )
+    if update.effective_chat.type == "private":
+
+        await update.message.reply_text(
+            "به منوی اصلی بازگشتید.",
+            reply_markup=MAIN_KEYBOARD,
+        )
+
+    else:
+
+        await update.message.reply_text(
+            "به منوی اصلی بازگشتید.",
+        )
 
 
 # ------------------- vpn menu ------------------
@@ -1168,55 +1214,461 @@ async def vpn_guide_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     else:
         message = update.message
 
-    await message.reply_text(
+    keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "📱 V2RayNG",
+                    callback_data="guide_v2rayng",
+                ),
+                InlineKeyboardButton(
+                    "📱 NPV Tunnel",
+                    callback_data="guide_npv",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    "📱 Hiddify Next",
+                    callback_data="guide_hiddify",
+                ),
+                InlineKeyboardButton(
+                    "📱 Netobox",
+                    callback_data="guide_netobox",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    "🍎 Streisand",
+                    callback_data="guide_streisand",
+                ),
+                InlineKeyboardButton(
+                    "🍎 FoXray",
+                    callback_data="guide_foxray",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    "🍎 Shadowrocket",
+                    callback_data="guide_shadowrocket",
+                ),
+            ],
+        ]
+    )
+
+    text = """
+📚 <i><b>آموزش اتصال</b></i>
+
+<b>برای استفاده از کانفیگ‌های ربات، ابتدا یکی از برنامه‌های زیر را نصب کنید.
+پیشنهاد ما <a href="https://play.google.com/store/apps/details?id=com.napsternetlabs.napsternetv">NPV Tunnel</a> هست.</b>
+
+🤖 <b>اندروید (Android)</b>
+🔹 <b>V2RayNG</b>
+🔹 <a href="https://play.google.com/store/apps/details?id=com.napsternetlabs.napsternetv"><b>NPV Tunnel</b></a>
+🔹 <a href="https://play.google.com/store/apps/details?id=app.hiddify.com"><b>Hiddify Next</b></a>
+🔹 <b>Netobox</b>
+🍎 <b>آیفون (iOS)</b>
+🔹 <b>Streisand</b>
+🔹 <a href="https://play.google.com/store/apps/details?id=com.github.foxray"><b>FoXray</b></a>
+🔹 <a href="https://play.google.com/store/apps/details?id=com.v2cross.proxy"><b>Shadowrocket</b></a>
+
+<b>پس از نصب برنامه موردنظر، از دکمه‌های زیر آموزش همان برنامه را انتخاب کنید.</b>
+"""
+
+    if update.callback_query:
+        await message.edit_text(
+            text=text,
+            parse_mode="HTML",
+            disable_web_page_preview=True,
+            reply_markup=keyboard,
+        )
+    else:
+        await message.reply_text(
+            text=text,
+            parse_mode="HTML",
+            disable_web_page_preview=True,
+            reply_markup=keyboard,
+        )
+
+
+# ------------------ guide v2rayng ------------------
+
+
+@membership_required
+async def guide_v2rayng(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    query = update.callback_query
+    await query.answer()
+
+    keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "💬 ارتباط با پشتیبانی",
+                    callback_data="contact_support",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    "🔙 بازگشت",
+                    callback_data="vpn_guide",
+                ),
+            ],
+        ]
+    )
+
+    await query.edit_message_text(
         """
-📚 <b>راهنمای استفاده از کانفیگ</b>
+📚 <i>آموزش V2rayNG</i>
 
-برای استفاده از کانفیگ، ابتدا برنامه <b>NPV Tunnel</b> را نصب کنید.
-
-📥 <a href="https://play.google.com/store/apps/details?id=com.napsternetlabs.napsternetv">دانلود NPV Tunnel از Google Play</a>
-
-یا می‌توانید از برنامه <b>V2RayNG</b> و سایر کلاینت‌های V2Ray نیز استفاده کنید؛
-پیشنهاد ما NPV Tunnel و V2RayNG است.
-
-━━━━━━━━━━━━━━
-
-📖 <b>آموزش اتصال با NPV Tunnel</b>
-
-1️⃣ کانفیگی که ربات برایتان ارسال کرده را <b>کپی</b> کنید.
-
-2️⃣ وارد برنامه <b>NPV Tunnel</b> شوید.
-
-3️⃣ از نوار پایین وارد بخش <b>Configs</b> شوید.
-
-4️⃣ روی علامت <b>➕</b> بالای صفحه بزنید.
-(محل آن بسته به زبان گوشی ممکن است سمت راست یا چپ باشد.)
-
-5️⃣ گزینه:
-
-<b>Import config from clipboard</b>
-
+➕ افزودن لینک سابسکریپشن
+🔹 برنامه <b>V2rayNG</b> را باز کنید.
+🔹 روی علامت <b>➕</b> بالای صفحه بزنید.
+🔹 اگر لینک را کپی کرده‌اید، گزینه
+<b>Import Configs from Clipboard</b>
 را انتخاب کنید.
+🔹 یا وارد
+<b>Subscription Group Setting</b>
+شوید.
+🔹 روی <b>➕</b> بزنید.
+🔹 در قسمت <b>Remarks</b> یک نام دلخواه
+(مثلاً <b>AMT V2Ray</b>) وارد کنید.
+🔹 لینک سابسکریپشن را در قسمت <b>URL</b> قرار دهید.
+🔹 روی <b>✔️</b> بزنید تا ذخیره شود.
 
-6️⃣ سپس گزینه:
+🔄 بروزرسانی (Update)
+✅ وارد صفحه اصلی شوید.
+✅ از منوی بالا گزینه
+<b>Update Subscription</b>
+را انتخاب کنید.
+✅ چند ثانیه صبر کنید تا سرورها دریافت شوند.
 
-<b>V2Ray Config</b>
+🟢 اتصال
+1️⃣ یکی از سرورها را انتخاب کنید.
+2️⃣ روی دکمه <b>V</b> پایین صفحه بزنید.
+3️⃣ در اولین اتصال، اجازه VPN را تأیید کنید.
+4️⃣ پس از اتصال، وضعیت باید روی <b>Connected</b> قرار بگیرد. ✅
 
-را بزنید.
-
-7️⃣ کانفیگ شما اضافه شد.
-
-8️⃣ از نوار پایین وارد بخش <b>Home</b> شوید.
-
-9️⃣ کانفیگ را انتخاب کرده و روی <b>Connect</b> بزنید.
-
-🎉 تمام!
-اگر مراحل را درست انجام داده باشید، VPN شما متصل خواهد شد.
-
-💬 اگر در هر مرحله به مشکلی برخورد کردید، از طریق بخش «ارتباط با پشتیبانی» با ما در ارتباط باشید.
+<b>اگر مشکلی داشتید از طریق دکمه پشتیبانی با ما در ارتباط باشید.</b>
 """,
         parse_mode="HTML",
         disable_web_page_preview=True,
+        reply_markup=keyboard,
+    )
+
+
+# ------------------ guide hiddify ------------------
+
+
+@membership_required
+async def guide_hiddify(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    query = update.callback_query
+    await query.answer()
+
+    keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "💬 ارتباط با پشتیبانی",
+                    callback_data="contact_support",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    "🔙 بازگشت",
+                    callback_data="vpn_guide",
+                ),
+            ],
+        ]
+    )
+
+    await query.edit_message_text(
+        """
+📚 <i>آموزش Hiddify Next</i>
+
+➕ افزودن لینک
+🔹 برنامه را باز کنید.
+🔹 روی <b>➕ Add Profile</b> بزنید.
+🔹 گزینه <b>From Clipboard</b> یا <b>From URL</b> را انتخاب کنید.
+🔹 لینک سابسکریپشن را وارد کنید.
+🔹 روی <b>Save</b> بزنید.
+
+🔄 بروزرسانی
+🔄 وارد پروفایل شوید.
+🔄 روی <b>Refresh</b> بزنید.
+🔄 سرورها به‌صورت خودکار بروزرسانی می‌شوند.
+
+🟢 اتصال
+🟢 روی دکمه اتصال بزنید.
+🟢 اجازه VPN را تأیید کنید.
+🟢 چند ثانیه صبر کنید تا متصل شوید.
+
+<b>اگر مشکلی داشتید از طریق دکمه پشتیبانی با ما در ارتباط باشید.</b>
+""",
+        parse_mode="HTML",
+        disable_web_page_preview=True,
+        reply_markup=keyboard,
+    )
+
+
+# ------------------ guide netobox ------------------
+
+
+@membership_required
+async def guide_netobox(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    query = update.callback_query
+    await query.answer()
+
+    keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "💬 ارتباط با پشتیبانی",
+                    callback_data="contact_support",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    "🔙 بازگشت",
+                    callback_data="vpn_guide",
+                ),
+            ],
+        ]
+    )
+
+    await query.edit_message_text(
+        """
+📚 <i>آموزش Nekobox</i>
+
+➕ افزودن لینک
+🔹 برنامه را باز کنید.
+🔹 وارد <b>Profiles</b> شوید.
+🔹 روی <b>➕</b> بزنید.
+🔹 گزینه <b>Add Subscription</b> را انتخاب کنید.
+🔹 لینک را وارد کنید.
+🔹 ذخیره کنید. 💾
+
+🔄 بروزرسانی
+🔄 از منوی پروفایل روی <b>Update Subscription</b> بزنید.
+
+🟢 اتصال
+🟢 سرور موردنظر را انتخاب کرده و دکمه اتصال را لمس کنید.
+
+<b>اگر مشکلی داشتید از طریق دکمه پشتیبانی با ما در ارتباط باشید.</b>
+""",
+        parse_mode="HTML",
+        disable_web_page_preview=True,
+        reply_markup=keyboard,
+    )
+
+
+# ------------------ guide streisand ------------------
+
+
+@membership_required
+async def guide_streisand(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    query = update.callback_query
+    await query.answer()
+
+    keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "💬 ارتباط با پشتیبانی",
+                    callback_data="contact_support",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    "🔙 بازگشت",
+                    callback_data="vpn_guide",
+                ),
+            ],
+        ]
+    )
+
+    await query.edit_message_text(
+        """
+📚 <i>آموزش Streisand</i>
+
+➕ افزودن لینک
+🔹 برنامه را باز کنید.
+🔹 روی <b>➕</b> بزنید.
+🔹 گزینه <b>Import from URL</b> را انتخاب کنید.
+🔹 لینک سابسکریپشن را وارد کنید.
+🔹 روی <b>Import</b> بزنید.
+
+🔄 بروزرسانی
+🔄 وارد پروفایل شوید.
+🔄 روی <b>Update</b> یا <b>Refresh</b> بزنید.
+
+🟢 اتصال
+🟢 سرور دلخواه را انتخاب کرده و دکمه اتصال را لمس کنید.
+
+<b>اگر مشکلی داشتید از طریق دکمه پشتیبانی با ما در ارتباط باشید.</b>
+""",
+        parse_mode="HTML",
+        disable_web_page_preview=True,
+        reply_markup=keyboard,
+    )
+
+
+# ------------------ guide foxray ------------------
+
+
+@membership_required
+async def guide_foxray(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    query = update.callback_query
+    await query.answer()
+
+    keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "💬 ارتباط با پشتیبانی",
+                    callback_data="contact_support",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    "🔙 بازگشت",
+                    callback_data="vpn_guide",
+                ),
+            ],
+        ]
+    )
+
+    await query.edit_message_text(
+        """
+📚 <i>آموزش FoXray</i>
+
+➕ افزودن لینک
+🔹 برنامه را باز کنید.
+🔹 روی <b>➕</b> بزنید.
+🔹 گزینه <b>Add Subscription</b> را انتخاب کنید.
+🔹 لینک را وارد کنید.
+🔹 ذخیره کنید. 💾
+
+🔄 بروزرسانی
+🔄 گزینه <b>Update Subscription</b> را انتخاب کنید.
+
+🟢 اتصال
+🟢 سرور موردنظر را انتخاب کرده و روی <b>Connect</b> بزنید.
+
+<b>اگر مشکلی داشتید از طریق دکمه پشتیبانی با ما در ارتباط باشید.</b>
+""",
+        parse_mode="HTML",
+        disable_web_page_preview=True,
+        reply_markup=keyboard,
+    )
+
+
+# ------------------ guide shadowrocket ------------------
+
+
+@membership_required
+async def guide_shadowrocket(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    query = update.callback_query
+    await query.answer()
+
+    keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "💬 ارتباط با پشتیبانی",
+                    callback_data="contact_support",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    "🔙 بازگشت",
+                    callback_data="vpn_guide",
+                ),
+            ],
+        ]
+    )
+
+    await query.edit_message_text(
+        """
+📚 <i>آموزش Shadowrocket</i>
+
+➕ افزودن لینک
+🔹 برنامه را باز کنید.
+🔹 روی <b>➕</b> بالای صفحه بزنید.
+🔹 نوع را روی <b>Subscribe</b> قرار دهید.
+🔹 یک نام دلخواه وارد کنید.
+🔹 لینک سابسکریپشن را در قسمت <b>URL</b> وارد کنید.
+🔹 روی <b>Done</b> بزنید.
+
+🔄 بروزرسانی
+🔄 روی سابسکریپشن نگه دارید یا گزینه <b>Update</b> را انتخاب کنید.
+
+🟢 اتصال
+🟢 سوئیچ بالای برنامه را روشن کنید.
+🟢 در اولین اتصال، اجازه <b>VPN</b> را تأیید کنید.
+
+<b>اگر مشکلی داشتید از طریق دکمه پشتیبانی با ما در ارتباط باشید.</b>
+""",
+        parse_mode="HTML",
+        disable_web_page_preview=True,
+        reply_markup=keyboard,
+    )
+
+
+# ------------------ guide npv ------------------
+
+
+@membership_required
+async def guide_npv(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    query = update.callback_query
+    await query.answer()
+
+    keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "💬 ارتباط با پشتیبانی",
+                    callback_data="contact_support",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    "🔙 بازگشت",
+                    callback_data="vpn_guide",
+                ),
+            ],
+        ]
+    )
+
+    await query.edit_message_text(
+        """
+📚 <i>آموزش NPV Tunnel</i>
+
+1️⃣ کانفیگی که ربات برایتان ارسال کرده را کپی کنید.
+2️⃣ وارد برنامه <b>NPV Tunnel</b> شوید.
+3️⃣ از نوار پایین وارد بخش <b>Configs</b> شوید.
+4️⃣ روی علامت <b>➕</b> بالای صفحه بزنید.
+(محل آن بسته به زبان گوشی ممکن است سمت راست یا چپ باشد.)
+5️⃣ گزینه:
+<b>Import config from clipboard</b>
+را انتخاب کنید.
+6️⃣ سپس گزینه:
+<b>V2Ray Config</b>
+را بزنید.
+7️⃣ کانفیگ شما اضافه شد.
+8️⃣ از نوار پایین وارد بخش <b>Home</b> شوید.
+9️⃣ کانفیگ را انتخاب کرده و روی <b>Connect</b> بزنید.
+
+<b>اگر مشکلی داشتید از طریق دکمه پشتیبانی با ما در ارتباط باشید.</b>
+""",
+        parse_mode="HTML",
+        disable_web_page_preview=True,
+        reply_markup=keyboard,
     )
 
 
@@ -1307,209 +1759,6 @@ async def admin_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         await update.message.reply_text(
             "❌ هنگام ارسال پاسخ خطایی رخ داد. خطا داخل ترمینال چاپ شد."
-        )
-
-        # ------------------ CRYPTO NEWS ------------------
-
-
-@membership_required
-async def crypto_news(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    waiting_message = await update.message.reply_text(
-        "🌍📰\n\n"
-        "لطفاً کمی صبر کنید...\n\n"
-        "🤖 در حال دریافت و آماده‌سازی اخبار هستیم. ✨"
-    )
-
-    try:
-
-        response = requests.get(
-            "https://newsdata.io/api/1/news",
-            params={
-                "apikey": GNEWS_API_KEY,
-                "q": "cryptocurrency OR bitcoin OR ethereum OR solana",
-                "language": "en",
-                "size": NEWS_COUNT,
-            },
-            timeout=30,
-        )
-
-        data = response.json()
-
-        if data.get("status") != "success":
-            await update.message.reply_text(
-                "❌ متأسفانه دریافت اخبار با مشکل مواجه شد.\n"
-                "لطفاً چند لحظه بعد دوباره امتحان کنید."
-            )
-            return
-
-        unique_news = []
-        seen_titles = set()
-
-        for item in data.get("results", []):
-
-            title = item.get("title", "").strip()
-
-            if title and title not in seen_titles and item.get("image_url"):
-                seen_titles.add(title)
-                unique_news.append(item)
-
-        if not unique_news:
-            await update.message.reply_text("❌ خبر مناسبی پیدا نشد.")
-            return
-
-        context.user_data["news_entries"] = unique_news
-        context.user_data["news_index"] = 0
-
-        news = unique_news[0]
-
-        try:
-            title = GoogleTranslator(source="auto", target="fa").translate(
-                news["title"]
-            )
-        except:
-            title = news["title"]
-
-        description = ""
-
-        if news.get("description"):
-
-            try:
-                description = GoogleTranslator(source="auto", target="fa").translate(
-                    news["description"]
-                )
-            except:
-                description = news["description"]
-
-        MAX_DESCRIPTION = 450
-
-        if description:
-
-            description = description.strip()
-
-            if len(description) > MAX_DESCRIPTION:
-                description = description[:MAX_DESCRIPTION].rsplit(" ", 1)[0] + "..."
-
-        caption = f"""📰 خبر شماره 1
-
-📌 {title}
-
-📝 {description}
-
-🌐 منبع: {news.get("source_id", "-")}"""
-
-        keyboard = InlineKeyboardMarkup(
-            [
-                [
-                    InlineKeyboardButton("📰 خبر بعدی", callback_data="next_news"),
-                    InlineKeyboardButton(
-                        "📖 مطالعه خبر", url=news.get("link", "https://newsdata.io/")
-                    ),
-                ]
-            ]
-        )
-
-        await waiting_message.delete()
-
-        await update.message.reply_photo(
-            photo=news["image_url"], caption=caption, reply_markup=keyboard
-        )
-
-    except Exception:
-
-        await update.message.reply_text("❌ خطا در دریافت اخبار.")
-
-
-# ------------------ NEXT NEWS ------------------
-
-
-@membership_required
-async def next_news(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    query = update.callback_query
-    await query.answer()
-
-    news_entries = context.user_data.get("news_entries", [])
-
-    if not news_entries:
-        await query.message.reply_text("❌ خبری یافت نشد.")
-        return
-
-    index = context.user_data.get("news_index", 0)
-
-    index += 1
-
-    if index >= len(news_entries):
-        index = 0
-
-    context.user_data["news_index"] = index
-
-    news = news_entries[index]
-
-    try:
-        title = GoogleTranslator(source="auto", target="fa").translate(news["title"])
-    except:
-        title = news["title"]
-
-    description = ""
-
-    if news.get("description"):
-
-        try:
-            description = GoogleTranslator(source="auto", target="fa").translate(
-                news["description"]
-            )
-        except:
-            description = news["description"]
-
-    MAX_DESCRIPTION = 450
-
-    if description:
-
-        description = description.strip()
-
-        if len(description) > MAX_DESCRIPTION:
-            description = description[:MAX_DESCRIPTION].rsplit(" ", 1)[0] + "..."
-
-    caption = f"""📰 خبر شماره {index + 1}
-
-📌 {title}
-
-📝 {description}
-
-🌐 منبع: {news.get("source_id", "-")}"""
-
-    keyboard = InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton("📰 خبر بعدی", callback_data="next_news"),
-                InlineKeyboardButton(
-                    "📖 مطالعه خبر", url=news.get("link", "https://newsdata.io/")
-                ),
-            ]
-        ]
-    )
-
-    try:
-        await query.message.delete()
-    except:
-        pass
-
-    try:
-
-        await context.bot.send_photo(
-            chat_id=query.message.chat.id,
-            photo=news["image_url"],
-            caption=caption,
-            reply_markup=keyboard,
-        )
-
-    except Exception as e:
-
-        await context.bot.send_message(
-            chat_id=query.message.chat.id,
-            text=caption,
-            reply_markup=keyboard,
         )
 
 
@@ -1688,7 +1937,9 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         iran_time = dt + timedelta(hours=3, minutes=30)
 
-        join_text = iran_time.strftime("%Y/%m/%d - %H:%M")
+        jdt = jdatetime.datetime.fromgregorian(datetime=iran_time)
+
+        join_text = jdt.strftime("%Y/%m/%d - %H:%M")
 
     else:
 
@@ -1919,7 +2170,7 @@ async def check_join_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 یک نفر با لینک دعوت شما عضو کانال شد. 🥳
 
-💳 مبلغ ۱۰٬۰۰۰ تومان به اعتبار حساب شما اضافه شد.
+💳 مبلغ 10,000 تومان به اعتبار حساب شما اضافه شد.
 """,
                 )
             except Exception:
@@ -1929,19 +2180,30 @@ async def check_join_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
 
         await query.message.delete()
 
-        await context.bot.send_message(
-            chat_id=user_id,
-            text="""✅ عضویت شما تایید شد.
+        if query.message.chat.type == "private":
+
+            await context.bot.send_message(
+                chat_id=user_id,
+                text="""✅ عضویت شما تایید شد.
 
 🎉 به ربات خوش اومدید
 
 🔮 برای ادامه، از دکمه‌های زیر استفاده کنید:""",
-            reply_markup=MAIN_KEYBOARD,
-        )
+                reply_markup=MAIN_KEYBOARD,
+            )
+
+        else:
+
+            await context.bot.send_message(
+                chat_id=user_id,
+                text="""✅ عضویت شما تایید شد.
+
+🎉 به ربات خوش اومدید
+
+🔮 برای ادامه، از منوی ربات استفاده کنید.""",
+            )
 
     else:
-
-        await query.answer()
 
         await query.message.reply_text(
             """
@@ -2178,6 +2440,451 @@ async def back_to_services(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+# ------------------ set news command ------------------
+
+
+@admin_only
+async def set_news_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    # اگر داخل گروه بود، کیبورد اصلی حذف شود
+    if update.effective_chat.type != "private":
+
+        await update.message.reply_text(
+            "🛠 حالت ثبت خبر فعال شد.",
+            reply_markup=ReplyKeyboardRemove(),
+        )
+
+    context.user_data["waiting_news_key"] = "main"
+
+    await update.message.reply_text("📰 متن خبر اصلی را ارسال کنید.")
+
+
+# ------------------ set prediction command ------------------
+
+
+@admin_only
+async def set_prediction_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    context.user_data["waiting_news_key"] = "prediction"
+
+    await update.message.reply_text("🔮 متن بخش «پیش‌بینی و احتمالات» را ارسال کنید.")
+
+
+# ------------------ set persons command ------------------
+
+
+@admin_only
+async def set_persons_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    context.user_data["waiting_news_key"] = "persons"
+
+    await update.message.reply_text("🎯 متن بخش «محورها و اشخاص» را ارسال کنید.")
+
+
+# ------------------ set market command ------------------
+
+
+@admin_only
+async def set_market_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    context.user_data["waiting_news_key"] = "market"
+
+    await update.message.reply_text("📈 متن بخش «بازار و اقتصاد (زنده)» را ارسال کنید.")
+
+
+# ------------------ set assessment command ------------------
+
+
+@admin_only
+async def set_assessment_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    context.user_data["waiting_news_key"] = "assessment"
+
+    await update.message.reply_text("🛡 متن بخش «ارزیابی و آسیب‌پذیری» را ارسال کنید.")
+
+
+# ------------------ receive news ------------------
+
+
+async def receive_news(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    key = context.user_data.get("waiting_news_key")
+
+    if key is None:
+        return
+
+    if not update.message:
+        return
+
+    # دریافت متن همراه با فرمت‌های HTML (Bold, Italic, Underline, Link و...)
+    text = update.message.text_html
+
+    if not text or not text.strip():
+        await update.message.reply_text("❌ لطفاً فقط متن خبر را ارسال کنید.")
+        return
+
+    # ذخیره در دیتابیس
+    set_news(key, text)
+
+    # خروج از حالت انتظار
+    context.user_data.pop("waiting_news_key", None)
+
+    await update.message.reply_text("✅ خبر با موفقیت ذخیره شد.")
+
+
+# ------------------ strategic news ------------------
+
+
+@membership_required
+async def strategic_news(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    news = get_news("main")
+
+    if not news:
+        news = "❌ هنوز هیچ خبر راهبردی ثبت نشده است."
+
+    keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "🔮 پیش‌بینی و احتمالات",
+                    callback_data="news_prediction",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    "🎯 محورها و اشخاص",
+                    callback_data="news_persons",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    "📈 بازار و اقتصاد (زنده)",
+                    callback_data="news_market",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    "🛡 ارزیابی و آسیب‌پذیری",
+                    callback_data="news_assessment",
+                ),
+            ],
+        ]
+    )
+
+    await update.message.reply_text(
+        news,
+        parse_mode="HTML",
+        disable_web_page_preview=True,
+        reply_markup=keyboard,
+    )
+
+
+# ------------------ news prediction callback ------------------
+
+
+async def news_prediction_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    await update.callback_query.answer()
+
+    news = get_news("prediction")
+
+    if not news:
+        news = "❌ هنوز متنی برای این بخش ثبت نشده است."
+
+    keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "🏠 بازگشت به داشبورد اصلی",
+                    callback_data="back_to_dashboard",
+                ),
+            ]
+        ]
+    )
+
+    await update.callback_query.edit_message_text(
+        text=news,
+        parse_mode="HTML",
+        disable_web_page_preview=True,
+        reply_markup=keyboard,
+    )
+
+
+# ------------------ news persons callback ------------------
+
+
+async def news_persons_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    await update.callback_query.answer()
+
+    news = get_news("persons")
+
+    if not news:
+        news = "❌ هنوز متنی برای این بخش ثبت نشده است."
+
+    keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "🏠 بازگشت به داشبورد اصلی",
+                    callback_data="back_to_dashboard",
+                ),
+            ]
+        ]
+    )
+
+    await update.callback_query.edit_message_text(
+        text=news,
+        parse_mode="HTML",
+        disable_web_page_preview=True,
+        reply_markup=keyboard,
+    )
+
+
+# ------------------ news market callback ------------------
+
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+
+async def news_market_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    await update.callback_query.answer()
+
+    news = get_news("market")
+
+    if isinstance(news, dict):
+        news_text = news.get("content") or "❌ هنوز متنی برای این بخش ثبت نشده است."
+    else:
+        news_text = news or "❌ هنوز متنی برای این بخش ثبت نشده است."
+
+    prices = get_market_prices()
+
+    # زمان تهران
+    now = datetime.now(ZoneInfo("Asia/Tehran"))
+
+    # تبدیل به شمسی
+    jnow = jdatetime.datetime.fromgregorian(datetime=now)
+
+    market_text = f"""
+{news_text}
+
+➖➖➖➖➖➖➖➖
+<b>📊 قیمت‌های زنده بازار:</b>
+
+┓ <b>💵 دلار آزاد ( ایران ):</b> {prices["usd"]} تومان
+┫ <b>🥇 طلای 18 عیار:</b> {prices["gold"]} تومان
+┫ <b>🪙 بیت‌کوین:</b> ${prices["bitcoin"]}
+┛ <b>💎 تون‌ ( گرام ):</b> ${prices["ton"]}
+
+<i>🕑 {jnow.strftime("%Y/%m/%d • %H:%M:%S")} (Tehran)</i>
+"""
+
+    keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "🏠 بازگشت به داشبورد اصلی",
+                    callback_data="back_to_dashboard",
+                ),
+            ]
+        ]
+    )
+
+    await update.callback_query.edit_message_text(
+        text=market_text,
+        parse_mode="HTML",
+        disable_web_page_preview=True,
+        reply_markup=keyboard,
+    )
+
+
+# ------------------ news assessment callback ------------------
+
+
+async def news_assessment_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    await update.callback_query.answer()
+
+    news = get_news("assessment")
+
+    if not news:
+        news = "❌ هنوز متنی برای این بخش ثبت نشده است."
+
+    keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "🏠 بازگشت به داشبورد اصلی",
+                    callback_data="back_to_dashboard",
+                ),
+            ]
+        ]
+    )
+
+    await update.callback_query.edit_message_text(
+        text=news,
+        parse_mode="HTML",
+        disable_web_page_preview=True,
+        reply_markup=keyboard,
+    )
+
+
+# ------------------ back news main ------------------
+
+
+async def back_news_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    await update.callback_query.answer()
+
+    news = get_news("main")
+
+    content = (
+        news["content"]
+        if news and news["content"]
+        else "❌ هنوز هیچ خبر راهبردی ثبت نشده است."
+    )
+
+    photo = news["photo"] if news else None
+
+    keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "🔮 پیش‌بینی و احتمالات",
+                    callback_data="news_prediction",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "🎯 محورها و اشخاص",
+                    callback_data="news_persons",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "📈 بازار و اقتصاد (زنده)",
+                    callback_data="news_market",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "🛡 ارزیابی و آسیب‌پذیری",
+                    callback_data="news_assessment",
+                )
+            ],
+        ]
+    )
+
+    if photo and update.callback_query.message.photo:
+
+        await update.callback_query.edit_message_caption(
+            caption=content,
+            parse_mode="HTML",
+            reply_markup=keyboard,
+        )
+
+    else:
+
+        await update.callback_query.edit_message_text(
+            text=content,
+            parse_mode="HTML",
+            disable_web_page_preview=True,
+            reply_markup=keyboard,
+        )
+
+
+# ------------------ set bot commands ------------------
+
+
+from telegram import BotCommand, BotCommandScopeChat, BotCommandScopeDefault
+
+
+async def set_bot_commands(application):
+
+    # حذف همه دستورات برای کاربران عادی (PV)
+    await application.bot.set_my_commands(
+        [],
+        scope=BotCommandScopeDefault(),
+    )
+
+    # دستورات فقط برای گروه ادمین
+    admin_commands = [
+        BotCommand("start", "شروع ربات"),
+        BotCommand("setnews", "ثبت خبر اصلی"),
+        BotCommand("setprediction", "ثبت پیش‌بینی و احتمالات"),
+        BotCommand("setpersons", "ثبت محورها و اشخاص"),
+        BotCommand("setmarket", "ثبت بازار و اقتصاد"),
+        BotCommand("setassessment", "ثبت ارزیابی و آسیب‌پذیری"),
+    ]
+
+    await application.bot.set_my_commands(
+        admin_commands,
+        scope=BotCommandScopeChat(chat_id=-1004269590368),
+    )
+
+
+# ------------------ chatid command ------------------
+
+
+@admin_only
+async def chatid_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        f"Chat ID:\n<code>{update.effective_chat.id}</code>",
+        parse_mode="HTML",
+    )
+
+
+# ------------------ back to dashboard ------------------
+
+
+async def back_to_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    await update.callback_query.answer()
+
+    news = get_news("main")
+
+    if not news:
+        news = "❌ هنوز هیچ خبر راهبردی ثبت نشده است."
+
+    keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "🔮 پیش‌بینی و احتمالات",
+                    callback_data="news_prediction",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    "🎯 محورها و اشخاص",
+                    callback_data="news_persons",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    "📈 بازار و اقتصاد (زنده)",
+                    callback_data="news_market",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    "🛡 ارزیابی و آسیب‌پذیری",
+                    callback_data="news_assessment",
+                ),
+            ],
+        ]
+    )
+
+    await update.callback_query.edit_message_text(
+        text=news,
+        parse_mode="HTML",
+        disable_web_page_preview=True,
+        reply_markup=keyboard,
+    )
+
+
 # ---------------------------------------------- HANDLERS -----------------------------------------
 
 
@@ -2189,6 +2896,27 @@ def get_handlers():
         CommandHandler("admin", admin_panel),
         CommandHandler("stats", stats),
         CommandHandler("test", test_command),
+        CommandHandler(
+            "setnews",
+            set_news_command,
+        ),
+        CommandHandler(
+            "setprediction",
+            set_prediction_command,
+        ),
+        CommandHandler(
+            "setpersons",
+            set_persons_command,
+        ),
+        CommandHandler(
+            "setmarket",
+            set_market_command,
+        ),
+        CommandHandler(
+            "setassessment",
+            set_assessment_command,
+        ),
+        CommandHandler("chatid", chatid_command),
         # ---------------- Reply Keyboard ----------------
         MessageHandler(filters.Regex("^👨‍💻 سازنده ربات$"), about_me),
         MessageHandler(filters.Regex("^🛠 خدمات$"), services),
@@ -2197,14 +2925,16 @@ def get_handlers():
         MessageHandler(filters.Regex("^🎁 اشتراک تست$"), vpn_test),
         MessageHandler(filters.Regex("^💎 خرید اشتراک$"), buy_vpn),
         MessageHandler(filters.Regex("^👥 زیرمجموعه گیری$"), referral_menu),
+        MessageHandler(
+            filters.Regex("^🛰️ داشبورد اخبار راهبردی$"),
+            strategic_news,
+        ),
         MessageHandler(filters.Regex("^📚 آموزش اتصال$"), vpn_guide_callback),
         MessageHandler(filters.Regex("^👤 پروفایل$"), profile),
-        MessageHandler(filters.Regex("^🌍 اخبار روز$"), crypto_news),
         MessageHandler(filters.Regex("^📦 اشتراک‌های من$"), my_subscriptions),
         MessageHandler(filters.Regex("^💬 ارتباط با پشتیبانی$"), contact_me),
         # ---------------- CallbackQuery ----------------
         CallbackQueryHandler(check_join_callback, pattern="^check_join$"),
-        CallbackQueryHandler(next_news, pattern="^next_news$"),
         CallbackQueryHandler(vpn_test_request, pattern="^vpn_test_request$"),
         CallbackQueryHandler(show_configs, pattern=r"^show_configs"),
         CallbackQueryHandler(back_to_subscription, pattern="^back_to_subscription$"),
@@ -2223,6 +2953,34 @@ def get_handlers():
         CallbackQueryHandler(buy_vpn_callback, pattern="^buy_vpn$"),
         CallbackQueryHandler(referral_menu, pattern="^referral_menu$"),
         CallbackQueryHandler(vpn_guide_callback, pattern="^vpn_guide$"),
+        CallbackQueryHandler(
+            guide_v2rayng,
+            pattern="^guide_v2rayng$",
+        ),
+        CallbackQueryHandler(
+            guide_hiddify,
+            pattern="^guide_hiddify$",
+        ),
+        CallbackQueryHandler(
+            guide_netobox,
+            pattern="^guide_netobox$",
+        ),
+        CallbackQueryHandler(
+            guide_streisand,
+            pattern="^guide_streisand$",
+        ),
+        CallbackQueryHandler(
+            guide_foxray,
+            pattern="^guide_foxray$",
+        ),
+        CallbackQueryHandler(
+            guide_shadowrocket,
+            pattern="^guide_shadowrocket$",
+        ),
+        CallbackQueryHandler(
+            guide_npv,
+            pattern="^guide_npv$",
+        ),
         CallbackQueryHandler(send_config_callback, pattern="^send_config_"),
         CallbackQueryHandler(
             already_received_callback,
@@ -2237,10 +2995,38 @@ def get_handlers():
             admin_broadcast_callback,
             pattern="^admin_broadcast$",
         ),
+        CallbackQueryHandler(
+            news_prediction_callback,
+            pattern="^news_prediction$",
+        ),
+        CallbackQueryHandler(
+            news_persons_callback,
+            pattern="^news_persons$",
+        ),
+        CallbackQueryHandler(
+            news_market_callback,
+            pattern="^news_market$",
+        ),
+        CallbackQueryHandler(
+            news_assessment_callback,
+            pattern="^news_assessment$",
+        ),
+        CallbackQueryHandler(
+            back_news_main,
+            pattern="^back_news_main$",
+        ),
+        CallbackQueryHandler(
+            back_to_dashboard,
+            pattern="^back_to_dashboard$",
+        ),
         # ---------------- Admin ----------------
         MessageHandler(
             filters.User(ADMIN_ID) & filters.REPLY & ~filters.COMMAND,
             admin_reply,
+        ),
+        MessageHandler(
+            filters.User(ADMIN_ID) & (filters.TEXT | filters.PHOTO) & ~filters.COMMAND,
+            receive_news,
         ),
         MessageHandler(
             filters.User(ADMIN_ID) & filters.TEXT & ~filters.COMMAND,

@@ -53,11 +53,21 @@ def init_db():
     )
     """)
 
+    # جدول اخبار راهبردی
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS strategic_news (
+    key TEXT PRIMARY KEY,
+    content TEXT,
+    photo TEXT
+)
+    """)
+
     conn.commit()
     conn.close()
 
     add_region_column()
     add_configs_column()
+    add_news_photo_column()
 
 
 # ------------------ add user ------------------
@@ -702,6 +712,22 @@ def add_configs_column():
     conn.close()
 
 
+# ------------------ add configs column ------------------
+
+
+def add_news_photo_column():
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("ALTER TABLE strategic_news ADD COLUMN photo TEXT")
+    except:
+        pass
+
+    conn.commit()
+    conn.close()
+
+
 # ------------------ update service configs ------------------
 
 
@@ -746,3 +772,52 @@ def get_service_configs_db(service_id):
         return []
 
     return row[0].split("\n")
+
+
+# ------------------ set news ------------------
+
+
+def set_news(key, content):
+
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        INSERT INTO strategic_news(key, content)
+        VALUES(?, ?)
+        ON CONFLICT(key)
+        DO UPDATE SET content = excluded.content
+        """,
+        (key, content),
+    )
+
+    conn.commit()
+    conn.close()
+
+
+# ------------------ get news ------------------
+
+
+def get_news(key):
+
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        SELECT content
+        FROM strategic_news
+        WHERE key=?
+        """,
+        (key,),
+    )
+
+    row = cursor.fetchone()
+
+    conn.close()
+
+    if row:
+        return row[0] or ""
+
+    return ""
